@@ -17,6 +17,8 @@ vi.mock('./hooks/useJoinedWorkspaceRefresh', () => ({ useJoinedWorkspaceRefresh:
 vi.mock('./lib/pdfExport', () => ({ exportCaptureHostToPdf: exports }));
 
 beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  HTMLDialogElement.prototype.close = function () { this.open = false; };
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   window.matchMedia = vi.fn().mockImplementation(() => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -166,6 +168,29 @@ it('exports the selected layout through the real PDF action, including from read
     await waitFor(() => expect(exports).toHaveBeenCalledTimes(layout === 'readable' ? 1 : 2));
     expect(await exports.mock.results.at(-1)!.value).toEqual({ layout, titles: ['1. 《歌曲 one》', '2. 《歌曲 two》'], controls: 0 });
     await waitFor(() => expect(document.querySelector('[data-pdf-capture-root]')).toBeNull());
+  }
+});
+
+it('releases the capture workspace and shares the prepared setlist PDF on the next tap', async () => {
+  const file = new File(['%PDF-1.4'], '歌詞排版聚會_首調.pdf', { type: 'application/pdf' });
+  exports.mockResolvedValueOnce(file);
+  const share = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'share', { configurable: true, value: share });
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:setlist');
+  try {
+    await mountLyrics();
+    fireEvent.click(screen.getAllByRole('button', { name: '更多' })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: '匯出歌單 PDF' }));
+    const dialog = await screen.findByRole('dialog', { name: 'PDF 已準備好' });
+    expect(dialog).toHaveTextContent(file.name);
+    expect(document.querySelector('[data-pdf-capture-root]')).toBeNull();
+    expect(document.body).not.toHaveClass('exporting-pdf');
+    expect(share).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '分享 PDF' }));
+    expect(share).toHaveBeenCalledWith({ files: [file] });
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+  } finally {
+    Reflect.deleteProperty(navigator, 'share');
   }
 });
 

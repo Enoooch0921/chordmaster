@@ -94,6 +94,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-22',
+        title: 'Share an exported PDF on iPad',
+        bullets: ['In iPad Safari or the Home Screen app, tap Share PDF after exporting a chart or setlist. If your messaging app is missing, open the PDF preview, tap Share, then choose PDF under Options.']
+      },
+      {
+        version: '0.12.60',
         date: '2026-11-20',
         title: 'Switch teams when storage is full',
         bullets: ['Open a cached library read-only during a server outage. When the server is available, ChordMaster verifies access and reloads the selected library.']
@@ -1342,6 +1348,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-22',
+        title: '在 iPad 分享匯出的 PDF',
+        bullets: ['在 iPad Safari 或從主畫面開啟 ChordMaster 時，匯出歌譜或歌單後可點「分享 PDF」傳送檔案。若清單中找不到 LINE，可開啟 PDF 預覽，再從分享選單的「選項」選擇 PDF。']
+      },
+      {
+        version: '0.12.60',
         date: '2026-11-20',
         title: '空間不足時也能切換團隊',
         bullets: ['裝置儲存空間不足時仍可切換團隊。NAS 暫時無法讀取時，可唯讀開啟已有副本的曲庫，恢復連線後會重新確認權限並載入最新譜面。']

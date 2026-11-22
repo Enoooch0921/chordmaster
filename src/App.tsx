@@ -144,6 +144,7 @@ import { useSongHistoryShortcuts } from './hooks/useSongHistoryShortcuts';
 import { rememberPreviewClipboard, usePreviewClipboardShortcuts, type PreviewClipboardTarget, type RememberedPreviewClipboard } from './hooks/usePreviewClipboardShortcuts';
 import { appendPreviewContent, copyPreviewContent, pastePreviewContent, type PreviewClipboard, type PreviewClipboardKind } from './lib/previewClipboard';
 import { useToast } from './components/Toast';
+import PdfShareDialog from './components/PdfShareDialog';
 import { PdfExportCancelledError, type PdfExportProgressState } from './lib/pdfExportTypes';
 import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
@@ -1666,6 +1667,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
   const [isLyricsContinuous, setIsLyricsContinuous] = useState(true);
   const [lyricsBookSettings, setLyricsBookSettings] = useState(DEFAULT_LYRICS_BOOK_SETTINGS);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [pdfToShare, setPdfToShare] = useState<File | null>(null);
   const [pdfExportProgress, setPdfExportProgress] = useState<PdfExportProgressState | null>(null);
   const [isLibraryEditing, setIsLibraryEditing] = useState(false);
   const [libraryTitleEditingSongId, setLibraryTitleEditingSongId] = useState<string | null>(null);
@@ -7357,10 +7359,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
 
   const exportCaptureHostToPdf = async (captureHost: HTMLElement, fileName: string) => {
     const { exportCaptureHostToPdf: exportPdf } = await import('./lib/pdfExport');
-    return exportPdf(captureHost, fileName, {
+    const file = await exportPdf(captureHost, fileName, {
       isCancelled: () => pdfExportCancelRequestedRef.current,
       onProgress: setPdfExportProgress,
     });
+    if (file instanceof File) setPdfToShare(file);
+    else toast.success(language === 'zh' ? 'PDF 已匯出' : 'PDF exported');
   };
 
   const handleExportPdf = async () => {
@@ -7491,7 +7495,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         captureHost.appendChild(exportSongWrapper);
         await exportCaptureHostToPdf(captureHost, buildPdfFileName(song));
       }
-      toast.success(language === 'zh' ? 'PDF 已匯出' : 'PDF exported');
     } catch (error) {
       if (error instanceof PdfExportCancelledError) {
         return;
@@ -14911,6 +14914,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
             </PresenceSurface>
           </PresenceSurface>
         )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {pdfToShare && <PdfShareDialog file={pdfToShare} language={language} standalone={isStandaloneDisplay}
+          onClose={() => setPdfToShare(null)} />}
       </AnimatePresence>
 
       <AnimatePresence initial={false} custom={uiMotion}>

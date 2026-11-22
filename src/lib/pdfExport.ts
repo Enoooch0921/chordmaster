@@ -16,12 +16,11 @@ const PDF_EXPORT_MOBILE_MAX_CANVAS_AREA = 12_000_000;
 const PDF_EXPORT_DESKTOP_MAX_CANVAS_SIDE = 16384;
 const PDF_EXPORT_DESKTOP_MAX_CANVAS_AREA = 64_000_000;
 
-const isAppleTouchWebDevice = () => {
-  if (typeof navigator === 'undefined') return false;
-  const userAgent = navigator.userAgent || '';
-  const platform = navigator.platform || '';
-  return /iPad|iPhone|iPod/i.test(userAgent) || (platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-};
+const isIPadWebDevice = () => /iPad/i.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+const makePdfFile = (pdf: jsPDF, name: string) =>
+  new File([pdf.output('blob')], name, { type: 'application/pdf' });
 
 const trySharePdfFileFromWeb = async (pdf: jsPDF, safeFileName: string) => {
   if (
@@ -32,8 +31,7 @@ const trySharePdfFileFromWeb = async (pdf: jsPDF, safeFileName: string) => {
     return false;
   }
 
-  const pdfBlob = pdf.output('blob') as Blob;
-  const pdfFile = new File([pdfBlob], safeFileName, { type: 'application/pdf' });
+  const pdfFile = makePdfFile(pdf, safeFileName);
   // WebKit can turn a title into a separate share item. The file already has
   // its name, so share only the PDF without title, text, or URL metadata.
   const shareData = { files: [pdfFile] };
@@ -60,7 +58,10 @@ export const savePdfDocument = async (pdf: jsPDF, fileName: string) => {
   const safeFileName = `${fileName}.pdf`;
 
   if (!Capacitor.isNativePlatform()) {
-    if (isAppleTouchWebDevice() && await trySharePdfFileFromWeb(pdf, safeFileName)) {
+    // Rendering a setlist can outlast Safari's transient user activation.
+    // Keep the finished file for a real tap on Share or Open PDF.
+    if (isIPadWebDevice()) return makePdfFile(pdf, safeFileName);
+    if (/iPhone|iPod/i.test(navigator.userAgent) && await trySharePdfFileFromWeb(pdf, safeFileName)) {
       return;
     }
 
@@ -275,6 +276,7 @@ export const exportCaptureHostToPdf = async (captureHost: HTMLElement, fileName:
       compress: true,
     });
 
+    pdf.setProperties({ title: fileName });
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = pdf.internal.pageSize.getHeight();
 
@@ -402,5 +404,5 @@ export const exportCaptureHostToPdf = async (captureHost: HTMLElement, fileName:
       throw new PdfExportCancelledError();
     }
 
-    await savePdfDocument(pdf, fileName);
+    return savePdfDocument(pdf, fileName);
   };

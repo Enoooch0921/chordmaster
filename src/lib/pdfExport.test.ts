@@ -29,6 +29,8 @@ describe('PDF delivery', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.native.mockReturnValue(false);
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: '' });
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 0 });
     Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'iPhone' });
     Object.defineProperty(navigator, 'share', { configurable: true, value: vi.fn().mockResolvedValue(undefined) });
     Object.defineProperty(navigator, 'canShare', { configurable: true, value: vi.fn().mockReturnValue(true) });
@@ -50,8 +52,12 @@ describe('PDF delivery', () => {
     Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Macintosh Safari' });
     Object.defineProperty(navigator, 'platform', { configurable: true, value: 'MacIntel' });
     Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 5 });
-    await savePdfDocument(document() as unknown as jsPDF, 'iPad');
-    expect(navigator.share).toHaveBeenCalledOnce();
+    const pdf = document();
+    const file = await savePdfDocument(pdf as unknown as jsPDF, '主日歌單');
+    expect(file).toBeInstanceOf(File);
+    expect(file).toMatchObject({ name: '主日歌單.pdf', type: 'application/pdf', size: 9 });
+    expect(navigator.share).not.toHaveBeenCalled();
+    expect(pdf.save).not.toHaveBeenCalled();
   });
 
   it('sends only the cached file to the native share sheet', async () => {
