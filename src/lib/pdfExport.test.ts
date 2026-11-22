@@ -38,13 +38,12 @@ describe('PDF delivery', () => {
   const document = () => ({ output: vi.fn((kind) => kind === 'blob'
     ? new Blob(['%PDF-1.4\n'], { type: 'application/pdf' }) : 'data:application/pdf;filename=x.pdf;base64,cGRm'), save: vi.fn() });
 
-  it('shares one named PDF on iPhone without title, text or URL', async () => {
+  it.each(['iPhone', 'iPad', 'Android'])('keeps the finished %s attachment until the user chooses how to send it', async agent => {
+    Object.defineProperty(navigator, 'userAgent', { configurable: true, value: agent });
     const pdf = document();
-    await savePdfDocument(pdf as unknown as jsPDF, '主日歌單');
-    const [payload] = vi.mocked(navigator.share).mock.calls[0];
-    expect(Object.keys(payload)).toEqual(['files']);
-    expect(payload.files).toHaveLength(1);
-    expect(payload.files![0]).toMatchObject({ name: '主日歌單.pdf', type: 'application/pdf', size: 9 });
+    const file = await savePdfDocument(pdf as unknown as jsPDF, '主日歌單');
+    expect(file).toMatchObject({ name: '主日歌單.pdf', type: 'application/pdf', size: 9 });
+    expect(navigator.share).not.toHaveBeenCalled();
     expect(pdf.save).not.toHaveBeenCalled();
   });
 
@@ -69,15 +68,8 @@ describe('PDF delivery', () => {
     expect(navigator.share).not.toHaveBeenCalled();
   });
 
-  it('does not download a second copy when the share sheet is cancelled', async () => {
-    vi.mocked(navigator.share).mockRejectedValue(new DOMException('Share aborted', 'AbortError'));
-    const pdf = document();
-    await savePdfDocument(pdf as unknown as jsPDF, 'song');
-    expect(pdf.save).not.toHaveBeenCalled();
-  });
-
-  it('falls back to downloading the PDF when file sharing is unsupported', async () => {
-    vi.mocked(navigator.canShare).mockReturnValue(false);
+  it('still downloads directly on a desktop browser', async () => {
+    Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Macintosh Safari' });
     const pdf = document();
     await savePdfDocument(pdf as unknown as jsPDF, 'song');
     expect(pdf.save).toHaveBeenCalledWith('song.pdf');

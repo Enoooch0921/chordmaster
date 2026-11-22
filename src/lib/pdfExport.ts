@@ -16,39 +16,11 @@ const PDF_EXPORT_MOBILE_MAX_CANVAS_AREA = 12_000_000;
 const PDF_EXPORT_DESKTOP_MAX_CANVAS_SIDE = 16384;
 const PDF_EXPORT_DESKTOP_MAX_CANVAS_AREA = 64_000_000;
 
-const isIPadWebDevice = () => /iPad/i.test(navigator.userAgent)
+const isMobilePdfShareDevice = () => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
   || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 const makePdfFile = (pdf: jsPDF, name: string) =>
   new File([pdf.output('blob')], name, { type: 'application/pdf' });
-
-const trySharePdfFileFromWeb = async (pdf: jsPDF, safeFileName: string) => {
-  if (
-    typeof navigator === 'undefined'
-    || typeof navigator.share !== 'function'
-    || typeof File === 'undefined'
-  ) {
-    return false;
-  }
-
-  const pdfFile = makePdfFile(pdf, safeFileName);
-  // WebKit can turn a title into a separate share item. The file already has
-  // its name, so share only the PDF without title, text, or URL metadata.
-  const shareData = { files: [pdfFile] };
-
-  try {
-    if (typeof navigator.canShare === 'function' && !navigator.canShare(shareData)) {
-      return false;
-    }
-
-    await navigator.share(shareData);
-    return true;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (/cancel|abort/i.test(message)) return true;
-    return false;
-  }
-};
 
 // On native iPad (Capacitor WKWebView), jsPDF's `.save()` relies on an
 // `<a download>` click that WKWebView silently ignores, so nothing happens.
@@ -58,12 +30,8 @@ export const savePdfDocument = async (pdf: jsPDF, fileName: string) => {
   const safeFileName = `${fileName}.pdf`;
 
   if (!Capacitor.isNativePlatform()) {
-    // Rendering a setlist can outlast Safari's transient user activation.
-    // Keep the finished file for a real tap on Share or Open PDF.
-    if (isIPadWebDevice()) return makePdfFile(pdf, safeFileName);
-    if (/iPhone|iPod/i.test(navigator.userAgent) && await trySharePdfFileFromWeb(pdf, safeFileName)) {
-      return;
-    }
+    // Open the system picker on a fresh tap after all pages have rendered.
+    if (isMobilePdfShareDevice()) return makePdfFile(pdf, safeFileName);
 
     pdf.save(safeFileName);
     return;

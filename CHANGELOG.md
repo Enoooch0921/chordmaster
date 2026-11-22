@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.62 - 2026-11-22
+
+- 在 iPhone 或 iPad 主畫面版匯出後，點「開啟或下載 PDF」，再點檔名下方的「更多⋯」選擇接收 App。在 Safari 可下載 PDF，再從「檔案」分享給 LINE 或其他 App。
+
 ## 0.12.61 - 2026-11-22
 
 - 在 iPad Safari 或從主畫面開啟 ChordMaster 時，匯出歌譜或歌單後可點「分享 PDF」傳送檔案。若清單中找不到 LINE，可開啟 PDF 預覽，再從分享選單的「選項」選擇 PDF。

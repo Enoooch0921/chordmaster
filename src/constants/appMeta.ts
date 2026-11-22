@@ -95,6 +95,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-22',
+        title: 'Send a PDF attachment from a phone or tablet',
+        bullets: ['In the iPhone or iPad Home Screen app, tap Open or download PDF, then More below the filename to choose a receiving app. In Safari, download the PDF and share it from Files to LINE or another app.']
+      },
+      {
+        version: '0.12.61',
+        date: '2026-11-22',
         title: 'Share an exported PDF on iPad',
         bullets: ['In iPad Safari or the Home Screen app, tap Share PDF after exporting a chart or setlist. If your messaging app is missing, open the PDF preview, tap Share, then choose PDF under Options.']
       },
@@ -1348,6 +1354,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-22',
+        title: '從手機和平板傳送 PDF 附件',
+        bullets: ['在 iPhone 或 iPad 主畫面版匯出後，點「開啟或下載 PDF」，再點檔名下方的「更多⋯」選擇接收 App。在 Safari 可下載 PDF，再從「檔案」分享給 LINE 或其他 App。']
+      },
+      {
+        version: '0.12.61',
         date: '2026-11-22',
         title: '在 iPad 分享匯出的 PDF',
         bullets: ['在 iPad Safari 或從主畫面開啟 ChordMaster 時，匯出歌譜或歌單後可點「分享 PDF」傳送檔案。若清單中找不到 LINE，可開啟 PDF 預覽，再從分享選單的「選項」選擇 PDF。']
