@@ -20,6 +20,7 @@ interface Props {
   triggerHost: HTMLSpanElement | null;
   chartVisible: boolean;
   hidePanel: boolean;
+  onOpenChange?: (open: boolean) => void;
   onPlaybackChange: (playback: ChordPlayback | null) => void;
   chartRef: React.RefObject<HTMLDivElement | null>;
 }
@@ -36,9 +37,14 @@ function auditionPositions(bar: Bar, beats: number) {
   ).flat();
 }
 
-export default function ReaderAudition({ song, identity, language, chartRef, triggerHost, userId, chartVisible, hidePanel, onPlaybackChange }: Props) {
+export default function ReaderAudition({ song, identity, language, chartRef, triggerHost, userId, chartVisible, hidePanel, onOpenChange, onPlaybackChange }: Props) {
   const zh = language === 'zh';
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    onOpenChange?.(true);
+    return () => onOpenChange?.(false);
+  }, [open, onOpenChange]);
   const [choosingStart, setChoosingStart] = useState(false);
   const panelId = useId();
   const pickerId = useId();

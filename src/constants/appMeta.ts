@@ -95,6 +95,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-26',
+        title: 'Move chords and review matching bars',
+        bullets: ['Drag a chord left or right to change its beat. Review suggested positions once for pending bars in the same song with the same key, meter, and chord sequence.']
+      },
+      {
+        version: '0.12.65',
+        date: '2026-11-26',
         title: 'Remove selected songs and use refreshed controls',
         bullets: [
           'Choose Select to remove in a setlist, check each song, then remove the selection. Songs stay in the library and you can undo the batch.',
@@ -1376,6 +1382,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-26',
+        title: '拖曳和弦換拍與同型小節核對',
+        bullets: ['在譜面左右拖曳和弦即可換拍。遇到拍位待核的小節，可採用建議拍位，一次確認本曲內調性、拍號與和弦順序相同的待核小節。']
+      },
+      {
+        version: '0.12.65',
         date: '2026-11-26',
         title: '歌單多選移除與介面細節',
         bullets: [

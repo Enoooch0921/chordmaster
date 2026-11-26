@@ -16,6 +16,8 @@ import { hasUnmeteredChords } from '../../utils/unmeteredChords';
 import { canCloseBar, isClosedBar } from '../../utils/closedBar';
 import ChordSubdivisionsEditor from '../ChordSubdivisionsEditor';
 import ChordBeatOffsetPicker from '../ChordBeatOffsetPicker';
+import ChordTimingReviewEditor from './ChordTimingReviewEditor';
+import { indexTimingReviews, timingBarKey, confirmChordTiming, moveChordToBeat, movableHarmony } from '../../lib/chordTimingReview';
 import ChordBeatStrip, { canSelectOffbeat } from './ChordBeatStrip';
 import { getChordDisplaySlotOwnership } from '../../utils/chordSlots';
 import { splitDirectChordRun } from '../../utils/chordSubdivisions';
@@ -296,6 +298,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const baseEditorSong = React.useMemo(() => isPickup ? toPickupEditorSong(sourceSession.draftSong) : sourceSession.draftSong,
     [isPickup, sourceSession.draftSong]);
   const sourceBar = findSongBar(baseEditorSong, sourceSession.target)?.bar;
+  const timingReview = React.useMemo(() => sourceBar?.chordTimingUnspecified
+    ? indexTimingReviews(baseEditorSong).get(timingBarKey(sourceSession.target.sectionId, sourceSession.target.barId)) : undefined,
+  [baseEditorSong, sourceBar?.chordTimingUnspecified, sourceSession.target.sectionId, sourceSession.target.barId]);
   const modeCursor = sourceSession.cursorByMode[sourceSession.notationMode];
   const requestedVoiceId = modeCursor.kind === 'chord' ? undefined : modeCursor.voiceId;
   const sourceVoices = sourceSession.notationMode === 'jianpu' ? sourceBar?.riffVoices : sourceBar?.rhythmVoices;
@@ -1155,12 +1160,32 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     );
   };
 
-  const renderChordBeatOffsetPicker = () => <ChordBeatOffsetPicker
+  const renderChordBeatOffsetPicker = () => {
+    const source = { chord: storedChord, beat: session.target.slotIndex, offset: editOffset ?? primaryOffset };
+    return <div className="flex flex-wrap items-center gap-2">
+      {bar && movableHarmony(storedChord) && <label className="flex items-center gap-1 text-xs font-semibold">
+        {language === 'zh' ? '移動和弦' : 'Move chord'}
+        <select name="move-chord-to-beat" className="min-h-8 rounded border border-slate-300 bg-white px-1 text-slate-900" value={source.beat}
+          onChange={event => {
+            const to = Number(event.target.value);
+            const next = moveChordToBeat(bar, beatCount, source, to);
+            if (next === bar) return;
+            onApplyDraft(updateBarById(session.draftSong, session.target, () => next));
+            onNotationCursorChange({ kind: 'chord', slotIndex: to, rawChordIndex: editingAdditional ? null : to,
+              ...(editOffset !== undefined ? { editOffset } : {}) });
+          }}>
+          {Array.from({ length: beatCount }, (_, beat) => <option key={beat} value={beat}
+            disabled={beat !== source.beat && moveChordToBeat(bar, beatCount, source, beat) === bar}>
+            {language === 'zh' ? `第 ${beat + 1} 拍` : `Beat ${beat + 1}`}</option>)}
+        </select>
+      </label>}
+      <ChordBeatOffsetPicker
     occupiedOffsets={bar?.chordSubdivisions?.filter(e=>e.beat===session.target.slotIndex).map(e=>e.offset)}
     value={bar ? getChordBeatOffset(bar, activeChordMarkIndex) : undefined}
     disabled={editingAdditional || !canOffsetChord(storedChord)} language={language}
     onChange={value => onApplyDraft(setChordBeatOffset(session.draftSong, session.target, value), { mergeKey: `chord-position:${bar?.id}:${session.target.slotIndex}` })}
-  />;
+  /></div>;
+  };
 
   const applyPreviewColor = (color: AnnotationColorId) => {
     if (!bar || previewColorDisabled) return;
@@ -1245,7 +1270,10 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     </div>}
     <div ref={setAuditionFeedbackHost} className="chord-audition-feedback" />
     <UnmeteredChordsEditor onSelectChord={orderedIndex => setAuditionSelection({ anchorKey: sourceSession.target.anchorKey, cursor: chordCursor, orderedIndex })} keyUnspecified={bar.chordKeyUnspecified} withinMeasure={!hasUnmeteredChords(bar)} lines={hasUnmeteredChords(bar)?bar.unmeteredChordLines!:[bar.chords]} language={language} onChange={lines=>hasUnmeteredChords(bar)?updateFields({unmeteredChordLines:lines}):onApplyDraft(updateBarById(session.draftSong,session.target,old=>({...old,chords:lines.flat()})))}/>
-    {!hasUnmeteredChords(bar)&&<button type="button" className="self-start rounded-md border border-slate-300 px-2 py-1 text-xs" onClick={()=>updateFields({chordTimingUnspecified:undefined})}>{language==='zh'?'設定和弦拍位':'Set chord beat positions'}</button>}
+    {timingReview ? <ChordTimingReviewEditor key={JSON.stringify([bar.id, timingReview.signature, timingReview.positions])}
+      review={timingReview} language={language} onConfirm={(positions, matching) => {
+        onApplyDraft(confirmChordTiming(session.draftSong, session.target, timingReview, positions, matching));
+      }}/> : !hasUnmeteredChords(bar)&&<button type="button" className="self-start rounded-md border border-slate-300 px-2 py-1 text-xs" onClick={()=>updateFields({chordTimingUnspecified:undefined})}>{language==='zh'?'設定和弦拍位':'Set chord beat positions'}</button>}
   </KeyboardSurface>;
 
   const closedCell = isClosedBar(sourceBar);

@@ -320,3 +320,19 @@ it('inserts before a bar inside a draft without losing input and supports draft 
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
   expect(bar(0).querySelector('[data-chord-root]')?.textContent).toBe('C');
 }, 15000);
+
+it.each(['songs', 'setlists'])('moves a suggested chord in all matching pending bars with a single undo in %s', async mode => {
+  const bars = fixture.songs[0].sections[0].bars;
+  bars[0] = { id: 'bar-0', chords: ['D/F#', '/', 'G', '/'] };
+  for (const i of [1, 2]) bars[i] = { id: `bar-${i}`, chords: ['D/F#', 'G'], chordTimingUnspecified: true };
+  bars[3] = { id: 'bar-3', chords: ['G', 'D/F#'], chordTimingUnspecified: true };
+  await start(mode);
+  const chord = bar(1).querySelector<HTMLElement>('[data-move-chord="G"][data-move-beat="2"]')!;
+  fireEvent.keyDown(chord, { key: 'ArrowRight' });
+  await waitFor(() => expect(bar(2).querySelector('[data-move-chord="G"][data-move-beat="3"]')).toBeInTheDocument());
+  expect(bar(0).querySelector('[data-move-chord="G"][data-move-beat="2"]')).toBeInTheDocument();
+  expect(bar(3).querySelector('[data-timing-review]')).toBeInTheDocument();
+  fireEvent.click(document.querySelector<HTMLButtonElement>('[data-preview-undo]')!);
+  await waitFor(() => expect(bar(1).querySelector('[data-timing-review]')).toBeInTheDocument());
+  expect(bar(2).querySelector('[data-timing-review]')).toBeInTheDocument();
+}, 15000);

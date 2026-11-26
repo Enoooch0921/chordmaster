@@ -1,3 +1,5 @@
+import ChordBeatDragLane, { beatHandle } from './ChordBeatDragLane';
+import { barWithReviewedTiming, movableHarmony, moveChordToBeat, timingBarKey, type BeatMove, type ChartTimingControls } from '../lib/chordTimingReview';
 import ChartSongMap, { type SongMapEditorOptions } from './ChartSongMap';
 import { getSongMap, shouldShowSongMap } from '../lib/songMap';
 import NotationSelectionPointer from './NotationSelectionPointer';
@@ -830,6 +832,7 @@ interface ChordSheetProps {
   showPageBadges?: boolean;
   /** Read-only measure excerpt; keeps the full song's key, meter and tie context. */
   excerpt?: { sectionIndex: number; barIndex: number };
+  timingControls?: ChartTimingControls;
   onSectionReorder?: (sourceSectionId: string, targetSectionId: string, placement: 'before' | 'after') => void;
 }
 
@@ -1373,7 +1376,7 @@ const ChordBeatGroup: React.FC<{
   </div>
 );
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMapEditor, lastEditedAt, language, currentKey, practiceTuning, transposeFromOriginal = true, showWrittenKeyInMetadata = false, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, readerAudition = false, showPageBadges = true, excerpt, onSectionReorder }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMapEditor, lastEditedAt, language, currentKey, practiceTuning, transposeFromOriginal = true, showWrittenKeyInMetadata = false, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, readerAudition = false, showPageBadges = true, excerpt, onSectionReorder, timingControls }) => {
   const editedAt = lastEditedAt === undefined ? getChartEditedAt(song) : lastEditedAt;
   const phraseCarries = React.useMemo(() => song.sections.map(section => {
     let primary = 0;
@@ -3515,13 +3518,24 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                             )}
                             {/* Chords */}
                                   {(() => {
-                                    const renderPrimaryChords = (orderedChords = bar.chords, untimedPass?: number) => {
+                                    const target = section?.id && bar.id ? { sectionId: section.id, barId: bar.id } : null;
+                                    const controls = target ? timingControls : undefined;
+                                    const candidate = controls && target && bar.chordTimingUnspecified
+                                      ? controls.reviews.get(timingBarKey(target.sectionId, target.barId)) : undefined;
+                                    const review = candidate?.beats === beatsPerBar ? candidate : undefined;
+                                    const primaryBar = review ? barWithReviewedTiming(bar, review) : bar;
+                                    const moveProps = (source: BeatMove) => controls ? beatHandle(source, displayBarChord(source.chord), language) : {};
+                                    const sourceNote = bar.annotation && <details className="absolute right-1 top-0 z-40 print:hidden" onClick={event => event.stopPropagation()}>
+                                      <summary aria-label={language === 'zh' ? '原譜註記' : 'Source annotation'} className="cursor-pointer list-none text-[9px] text-slate-500">{language === 'zh' ? '註' : 'Note'}</summary>
+                                      <div className="fixed bottom-12 left-3 right-3 whitespace-pre-wrap rounded-lg border border-slate-300 bg-white p-3 text-xs leading-5 text-slate-700 shadow-lg sm:absolute sm:bottom-full sm:left-auto sm:right-0 sm:w-72">{bar.annotation}</div>
+                                    </details>;
+                                    const renderPrimaryChords = (orderedChords = primaryBar.chords, untimedPass?: number, bar = primaryBar) => {
                                     if (bar.chordTimingUnspecified) return <div data-untimed-measure-chords={bar.id} className={`flex min-w-0 w-full flex-col gap-3 ${contentLeftInsetClass}`}>
                                       <span className="text-[8px] font-medium text-amber-700">{untimedPass ? (language==='zh'?`第${untimedPass}遍 · 拍位待核`:`Pass ${untimedPass} · timing unspecified`) : (language==='zh'?'拍位待核':'Timing unspecified')}</span>
                                       <div role={onElementClick?'button':undefined} tabIndex={onElementClick?0:undefined} aria-label={language==='zh'?'編輯小節和弦順序':'Edit chord order in measure'} data-preview-hover-field={onElementClick?'chords':undefined} className="min-w-0 w-full" onClick={event=>emitElementClick(event,row.sIdx,row.startBIdx+bIdx,'chords')} onKeyDown={event=>{if(onElementClick&&(event.key==='Enter'||event.key===' ')){event.preventDefault();emitElementClick(event as unknown as React.MouseEvent<HTMLElement>,row.sIdx,row.startBIdx+bIdx,'chords')}}}>
                                         <AutoShrink align="left" minScale={0} fitNarrow shrinkAxis="x-only" className="h-[24px] items-end !overflow-visible"><div className="inline-flex items-end gap-x-3 whitespace-nowrap">{orderedChords.filter(chord=>chord.trim()).map((chord,index)=><span key={index} data-untimed-chord data-audition-token={index} className="inline-flex min-w-0"><FormattedChord chordString={displayBarChord(chord)} compactModifier={compactModifier} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily}/></span>)}</div></AutoShrink>
                                       </div>
-                                      {bar.annotation&&<details className="absolute right-1 top-0 z-40 print:hidden" onClick={event=>event.stopPropagation()}><summary aria-label={language==='zh'?'原譜註記':'Source annotation'} className="cursor-pointer list-none text-[8px] text-slate-500">{language==='zh'?'註':'Note'}</summary><div className="fixed bottom-12 left-3 right-3 rounded-lg border border-slate-300 bg-white p-3 text-xs leading-5 text-slate-700 shadow-lg sm:absolute sm:bottom-full sm:left-auto sm:right-0 sm:w-72">{bar.annotation}</div></details>}
+                                      {sourceNote}
                                     </div>;
                                     const renderRhythmInChordLane = showRhythmInChordLane;
 
@@ -3589,6 +3603,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                                       {timedEvents.map((entry, index) => <div key={index}
                                         style={onElementClick ? { zIndex: 11 } : undefined} data-audition-beat={entry.beat} data-audition-offset={entry.offset} data-chord-event-position={chordEventLabel(entry.beat, entry.offset)}
                                         aria-label={chordEventLabel(entry.beat, entry.offset)}
+                                        {...moveProps(entry)} data-audition-token={review && entry.chord !== '/' ? review.positions.indexOf(entry.beat) : undefined}
                                         data-chord-beat-offset={entry.offset || undefined}
                                         data-chord-beat-position={entry.offset ? chordEventLabel(entry.beat, entry.offset) : undefined}
                                         data-chord-event-kind={entry.subdivisionIndex === null ? 'primary' : 'additional'}
@@ -3608,7 +3623,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                                         {Array.from({length:beatsPerBar}, (_,beat) => {
                                           const beatEvents = events.filter(entry => entry.beat === beat);
                                           return <ChordBeatGroup key={beat} beat={beat} offset={beatEvents[0]?.offset ?? 0} labels={chordBeatGroupLabels(beatEvents)}>
-                                            {beatEvents.map((entry,index) => <div key={index} style={onElementClick ? { zIndex: 11 } : undefined} data-audition-beat={entry.beat} data-audition-offset={entry.offset} data-chord-event-position={chordEventLabel(entry.beat,entry.offset)} data-chord-event-kind={entry.subdivisionIndex === null ? 'primary' : 'additional'} className="relative min-w-max" onClick={event=>{event.stopPropagation();emitElementClick(event,row.sIdx,row.startBIdx+bIdx,'chords',entry.beat,entry.rawIndex ?? undefined);}}>
+                                            {beatEvents.map((entry,index) => <div key={index} {...moveProps(entry)} style={onElementClick ? { zIndex: 11 } : undefined} data-audition-beat={entry.beat} data-audition-offset={entry.offset} data-chord-event-position={chordEventLabel(entry.beat,entry.offset)} data-chord-event-kind={entry.subdivisionIndex === null ? 'primary' : 'additional'} className="relative min-w-max" onClick={event=>{event.stopPropagation();emitElementClick(event,row.sIdx,row.startBIdx+bIdx,'chords',entry.beat,entry.rawIndex ?? undefined);}}>
                                               <span className="sr-only">{chordEventLabel(entry.beat,entry.offset)}</span>
                                               <div className="flex h-[24px] items-end overflow-visible">
                                                 <FormattedChord chordString={displayBarChord(entry.chord)} compactModifier={compactModifier} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} color={entry.rawIndex === null ? undefined : getChordMarkTextColor(bar,entry.rawIndex)} specialLabel={entry.rawIndex === null ? undefined : getChordSpecialLabel(bar,entry.rawIndex,language)}/>
@@ -3723,7 +3738,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                                                 <FittedBeatChord
                                                   startOffsetFraction={beatOffset ? beatOffset / engravingSpan : 0}
 	                                                >
-	                                                  <div className={`pointer-events-auto ${renderedChord === '/' ? 'flex' : 'inline-flex'} min-w-0 origin-center items-end leading-none`}>
+	                                                  <div {...moveProps({ beat: anchor.slotIndex, offset: beatOffset ?? 0, chord: anchor.chord })} className={`pointer-events-auto ${renderedChord === '/' ? 'flex' : 'inline-flex'} min-w-0 origin-center items-end leading-none`}>
 	                                                    <FormattedChord
 	                                                      chordString={renderedChord}
 	                                                      compactModifier={compactModifier}
@@ -3801,7 +3816,45 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                                       )
                                     );
                                     };
-                                    if (!bar.chordPassVariants?.length) return renderPrimaryChords();
+                                    const renderEditableChords = () => {
+                                      const content = renderPrimaryChords();
+                                      if (!controls || !target || primaryBar.chordTimingUnspecified
+                                          || !getChordEvents(primaryBar, beatsPerBar).some(entry => movableHarmony(entry.chord))) return content;
+                                      const positionsAfterMove = (positions: number[], source: BeatMove, to: number) =>
+                                        positions.map(beat => beat === source.beat ? to : beat);
+                                      return <ChordBeatDragLane key={JSON.stringify([previewIdentity, target.sectionId, target.barId])} beats={beatsPerBar}
+                                        canMove={(source, to) => {
+                                          if (moveChordToBeat(primaryBar, beatsPerBar, source, to) === primaryBar) return false;
+                                          return !review || positionsAfterMove(review.positions, source, to).every((beat, i, all) => i === 0 || beat > all[i - 1]);
+                                        }}
+                                        onMove={(source, to) => controls.onEdit(target, review
+                                          ? { kind: 'review', review, positions: positionsAfterMove(review.positions, source, to) }
+                                          : { kind: 'move', source, to, beats: beatsPerBar })}>{content}</ChordBeatDragLane>;
+                                    };
+                                    if (review && controls && target) {
+                                      const scope = language === 'zh' ? `確認 ${review.count} 個同型小節` : `Confirm ${review.count} ${review.count === 1 ? 'bar' : 'bars'}`;
+                                      const description = language === 'zh' ? `確認本曲 ${review.count} 個同型待核小節，拖曳和弦可調整拍位` : `Confirm timing for ${review.count} matching bars. Drag a chord to adjust its beat.`;
+                                      return <>
+                                        <div data-timing-review data-preview-edit-ui className="flex w-full min-w-0 flex-col print:hidden">
+                                          <button className="timing-review-action" type="button" data-preview-only-control title={description}
+                                            onClick={event => {
+                                              event.stopPropagation();
+                                              if (review.manual) {
+                                                emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords', 0);
+                                                return;
+                                              }
+                                              const cell = event.currentTarget.closest('.sheet-bar');
+                                              const keyboard = event.detail === 0;
+                                              controls.onEdit(target, { kind: 'review', review, positions: review.positions });
+                                              if (keyboard) requestAnimationFrame(() => cell?.querySelector<HTMLElement>('[data-move-chord]')?.focus({ preventScroll: true }));
+                                            }}>{review.manual ? (language === 'zh' ? '待人工 · 核對拍位…' : 'Review timing…') : (language === 'zh' ? `建議拍位 · ${scope}` : `Suggested · ${scope}`)}</button>
+                                          {renderEditableChords()}
+                                          {sourceNote}
+                                        </div>
+                                        <div data-timing-print-source className="hidden print:block">{renderPrimaryChords(bar.chords, undefined, bar)}</div>
+                                      </>;
+                                    }
+                                    if (!bar.chordPassVariants?.length) return renderEditableChords();
                                     if (bar.chordTimingUnspecified) return <div data-chord-pass-stack className="flex w-full min-w-0 flex-col gap-2">{bar.chordPassVariants.map(variant=><div key={variant.pass} data-chord-pass={variant.pass}>{renderPrimaryChords(variant.chords,variant.pass)}</div>)}<div data-chord-pass="1">{renderPrimaryChords()}</div></div>;
                                     return <div data-chord-pass-stack className="flex w-full min-w-0 flex-1 flex-col">
                                       {bar.chordPassVariants.map(variant => {
@@ -3821,7 +3874,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                                           </div>
                                         </div>;
                                       })}
-                                      <div data-chord-pass="1" className="relative flex min-h-[27px] w-full min-w-0 flex-1">{renderPrimaryChords()}</div>
+                                      <div data-chord-pass="1" className="relative flex min-h-[27px] w-full min-w-0 flex-1">{renderEditableChords()}</div>
                                     </div>;
                                   })()}
                             {hasBarLabelInContentLane && !labelSharesNotationLane && (
