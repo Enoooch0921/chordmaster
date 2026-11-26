@@ -360,10 +360,10 @@ export default function SharedChartPage() {
       const firstSongId = songImportResult.songs[0]?.songId;
       return (
         <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-5 text-center">
-          <div className="text-base font-black text-emerald-800">
+          <div className="text-base font-bold text-emerald-800">
             {language === 'zh' ? '歌曲已導入個人歌庫' : 'Songs imported to your personal library'}
           </div>
-          <p className="mt-2 text-sm font-semibold text-emerald-700">
+          <p className="mt-2 text-sm font-semibold tabular-nums text-emerald-700">
             {language === 'zh'
               ? `新增 ${songImportResult.createdCount} 首、另存副本 ${songImportResult.duplicatedCount} 首、覆蓋 ${songImportResult.overwrittenCount} 首`
               : `${songImportResult.createdCount} added, ${songImportResult.duplicatedCount} duplicated, ${songImportResult.overwrittenCount} overwritten`}
@@ -372,7 +372,7 @@ export default function SharedChartPage() {
             <button
               type="button"
               onClick={() => navigate(`/?song=${encodeURIComponent(firstSongId)}`)}
-              className="mt-4 inline-flex items-center justify-center rounded-xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-emerald-800"
+              className="ui-press mt-4 inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-emerald-800"
             >
               {language === 'zh' ? '打開我的歌庫' : 'Open My Library'}
             </button>
@@ -384,7 +384,7 @@ export default function SharedChartPage() {
     if (importInspection && conflictingSongs.length > 0) {
       return (
         <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:p-5">
-          <div className="text-base font-black text-amber-900">
+          <div className="text-base font-bold tabular-nums text-amber-900">
             {language === 'zh' ? `發現 ${conflictingSongs.length} 首已導入歌曲` : `${conflictingSongs.length} previously imported song(s)`}
           </div>
           <p className="mt-1 text-xs leading-relaxed text-amber-700">
@@ -399,7 +399,7 @@ export default function SharedChartPage() {
                   setDefaultImportResolution(resolution);
                   setPerSongResolutions({});
                 }}
-                className={`rounded-xl border px-3 py-3 text-left text-sm font-bold transition-colors ${defaultImportResolution === resolution ? 'border-indigo-500 bg-indigo-600 text-white' : 'border-amber-200 bg-white text-stone-700 hover:border-indigo-300'}`}
+                className={`ui-press rounded-xl border px-3 py-3 text-left text-sm font-bold transition-colors ${defaultImportResolution === resolution ? 'border-indigo-500 bg-indigo-600 text-white' : 'border-amber-200 bg-white text-stone-700 hover:border-indigo-300'}`}
               >
                 {resolution === 'duplicate'
                   ? (language === 'zh' ? '保留我的版本，另存新副本' : 'Keep mine and create a copy')
@@ -419,7 +419,7 @@ export default function SharedChartPage() {
                       ...current,
                       [item.sourceSongId]: event.target.value as SongImportResolution
                     }))}
-                    className="rounded-lg border border-stone-200 bg-white px-2 py-2 text-xs font-bold text-stone-700"
+                    className="rounded-lg border border-stone-200 bg-white px-2 py-2 text-base font-bold text-stone-700 sm:text-xs"
                   >
                     <option value="duplicate">{language === 'zh' ? '另存新副本' : 'Create copy'}</option>
                     <option value="overwrite">{language === 'zh' ? '覆蓋既有歌曲' : 'Overwrite existing'}</option>
@@ -429,14 +429,14 @@ export default function SharedChartPage() {
             })}
           </div>
           <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <button type="button" onClick={() => setImportInspection(null)} className="rounded-xl border border-stone-200 bg-white px-4 py-2.5 text-sm font-bold text-stone-600">
+            <button type="button" onClick={() => setImportInspection(null)} className="ui-press min-h-11 rounded-xl border border-stone-200 bg-white px-4 py-2.5 text-sm font-bold text-stone-600 transition-colors hover:bg-stone-50">
               {language === 'zh' ? '取消' : 'Cancel'}
             </button>
             <button
               type="button"
               onClick={() => void completeSongImport(defaultImportResolution, perSongResolutions)}
               disabled={isJoining}
-              className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
+              className="ui-press min-h-11 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
             >
               {isJoining ? (language === 'zh' ? '導入中...' : 'Importing...') : (language === 'zh' ? '確認並導入' : 'Confirm Import')}
             </button>
@@ -453,7 +453,7 @@ export default function SharedChartPage() {
             type="button"
             onClick={() => void handleSongImport()}
             disabled={isJoining}
-            className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60 sm:w-auto sm:min-w-64"
+            className="ui-press min-h-11 w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60 sm:w-auto sm:min-w-64"
           >
             {isJoining
               ? (language === 'zh' ? '檢查中...' : 'Checking...')
@@ -469,7 +469,7 @@ export default function SharedChartPage() {
         <p className="mb-3 text-sm text-stone-500">
           {language === 'zh' ? '登入後即可導入到你的個人歌庫' : 'Sign in to import these songs to your personal library'}
         </p>
-        <button type="button" onClick={() => void handleSignIn()} disabled={isSigningIn} className="rounded-xl bg-stone-900 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+        <button type="button" onClick={() => void handleSignIn()} disabled={isSigningIn} className="ui-press min-h-11 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60">
           {isSigningIn ? (language === 'zh' ? '登入中...' : 'Signing in...') : (language === 'zh' ? '前往登入' : 'Sign In')}
         </button>
         {joinError && <p className="mt-2 text-center text-xs text-rose-600">{joinError}</p>}
@@ -486,25 +486,25 @@ export default function SharedChartPage() {
   />;
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(191,219,254,0.45),_transparent_36%),linear-gradient(180deg,_#fafaf9_0%,_#f5f5f4_100%)] px-4 py-8 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(46,140,94,0.12),_transparent_42%),linear-gradient(180deg,_#fafaf9_0%,_#f5f5f4_100%)] px-4 py-8 sm:px-6 lg:px-8 dark:bg-[var(--color-canvas)]">
       <div className={`mx-auto ${isSongShare ? 'max-w-6xl' : 'max-w-md'}`}>
-        <div className="rounded-[2rem] border border-stone-200/80 bg-white/90 p-3 sm:p-6 shadow-[0_25px_80px_rgba(28,25,23,0.08)] backdrop-blur">
+        <div className="rounded-[2rem] border border-stone-200/80 bg-white/95 p-3 shadow-[0_25px_80px_rgba(28,25,23,0.08)] sm:p-6">
 
           {/* Header bar */}
           <div className="mb-6 flex items-center justify-between">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-400">{APP_NAME}</div>
+            <div className="text-xs font-semibold text-stone-500">{APP_NAME}</div>
             <div className="inline-flex items-center rounded-full border border-stone-200 bg-stone-50 p-0.5 text-xs font-bold text-stone-500">
               <button
                 type="button"
                 onClick={() => setLanguage('zh')}
-                className={`rounded-full px-2.5 py-1 transition-colors ${language === 'zh' ? 'bg-stone-900 text-white' : ''}`}
+                className={`ui-press rounded-full px-2.5 py-1 transition-colors ${language === 'zh' ? 'bg-indigo-600 text-white' : 'hover:text-stone-900'}`}
               >
                 中文
               </button>
               <button
                 type="button"
                 onClick={() => setLanguage('en')}
-                className={`rounded-full px-2.5 py-1 transition-colors ${language === 'en' ? 'bg-stone-900 text-white' : ''}`}
+                className={`ui-press rounded-full px-2.5 py-1 transition-colors ${language === 'en' ? 'bg-indigo-600 text-white' : 'hover:text-stone-900'}`}
               >
                 EN
               </button>
@@ -528,7 +528,7 @@ export default function SharedChartPage() {
               <button
                 type="button"
                 onClick={() => void handleCopyShareLink()}
-                className="mt-2 inline-flex items-center rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-800 transition-colors hover:bg-amber-100"
+                className="ui-press mt-2 inline-flex items-center rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-800 transition-colors hover:bg-amber-100"
               >
                 {linkCopied
                   ? (language === 'zh' ? '已複製連結 ✓' : 'Link copied ✓')
@@ -555,12 +555,12 @@ export default function SharedChartPage() {
             </div>
           ) : payload?.songBundle && selectedBundleSong ? (
             <>
-              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">
+              <div className="mb-1 text-xs font-semibold text-stone-500">
                 {language === 'zh' ? '歌曲分享' : 'Shared Songs'}
               </div>
               <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
                 <div>
-                  <h1 className="text-3xl font-bold tracking-tight text-stone-900">
+                  <h1 className="text-3xl font-bold tracking-tight tabular-nums text-stone-900">
                     {language === 'zh' ? `${payload.songBundle.songs.length} 首歌曲` : `${payload.songBundle.songs.length} Songs`}
                   </h1>
                   <p className="mt-1 text-sm text-stone-500">
@@ -569,10 +569,10 @@ export default function SharedChartPage() {
                 </div>
                 {(selectedBundleSong.song.lyricsDoc?.chinese?.trim() || selectedBundleSong.song.lyricsDoc?.english?.trim()) ? (
                   <div className="inline-flex rounded-xl border border-stone-200 bg-white p-1 text-sm font-semibold shadow-sm">
-                    <button type="button" onClick={() => setShowSharedLyrics(false)} className={`rounded-lg px-3 py-1.5 ${!showSharedLyrics ? 'bg-stone-900 text-white' : 'text-stone-600'}`}>
+                    <button type="button" onClick={() => setShowSharedLyrics(false)} className={`ui-press rounded-lg px-3 py-1.5 transition-colors ${!showSharedLyrics ? 'bg-indigo-600 text-white' : 'text-stone-600 hover:text-stone-900'}`}>
                       {language === 'zh' ? '和弦譜' : 'Chart'}
                     </button>
-                    <button type="button" onClick={() => setShowSharedLyrics(true)} className={`rounded-lg px-3 py-1.5 ${showSharedLyrics ? 'bg-stone-900 text-white' : 'text-stone-600'}`}>
+                    <button type="button" onClick={() => setShowSharedLyrics(true)} className={`ui-press rounded-lg px-3 py-1.5 transition-colors ${showSharedLyrics ? 'bg-indigo-600 text-white' : 'text-stone-600 hover:text-stone-900'}`}>
                       {language === 'zh' ? '歌詞' : 'Lyrics'}
                     </button>
                   </div>
@@ -589,16 +589,16 @@ export default function SharedChartPage() {
                         setSelectedBundleSongId(item.id);
                         setShowSharedLyrics(false);
                       }}
-                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors ${item.id === selectedBundleSong.id ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-stone-800 hover:bg-indigo-50'}`}
+                      className={`ui-press flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors ${item.id === selectedBundleSong.id ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-stone-800 hover:bg-indigo-50'}`}
                     >
-                      <span className={`w-5 shrink-0 text-right text-xs font-black ${item.id === selectedBundleSong.id ? 'text-indigo-200' : 'text-stone-400'}`}>{index + 1}</span>
+                      <span className={`w-5 shrink-0 text-right text-xs font-bold tabular-nums ${item.id === selectedBundleSong.id ? 'text-indigo-200' : 'text-stone-400'}`}>{index + 1}</span>
                       <span className="min-w-0 flex-1 truncate text-sm font-bold">{item.title}</span>
                     </button>
                   ))}
                 </div>
                 <div className="min-w-0">
                   <div className="mb-3 flex flex-wrap items-center gap-x-3">
-                    <h2 className="min-w-0 flex-[1_1_11rem] text-xl font-black text-stone-900">{selectedBundleSong.title}</h2>
+                    <h2 className="min-w-0 flex-[1_1_11rem] text-xl font-bold text-stone-900">{selectedBundleSong.title}</h2>
                     <span className="contents" ref={setAuditionHost} />
                   </div>
                   <div className="overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-1 shadow-sm sm:p-6">
@@ -621,14 +621,14 @@ export default function SharedChartPage() {
                     <button
                       type="button"
                       onClick={() => setShowSharedLyrics(false)}
-                      className={`rounded-lg px-3 py-1.5 transition-colors ${!showSharedLyrics ? 'bg-stone-900 text-white' : 'text-stone-600 hover:text-stone-900'}`}
+                      className={`ui-press rounded-lg px-3 py-1.5 transition-colors ${!showSharedLyrics ? 'bg-indigo-600 text-white' : 'text-stone-600 hover:text-stone-900'}`}
                     >
                       {language === 'zh' ? '和弦譜' : 'Chart'}
                     </button>
                     <button
                       type="button"
                       onClick={() => setShowSharedLyrics(true)}
-                      className={`rounded-lg px-3 py-1.5 transition-colors ${showSharedLyrics ? 'bg-stone-900 text-white' : 'text-stone-600 hover:text-stone-900'}`}
+                      className={`ui-press rounded-lg px-3 py-1.5 transition-colors ${showSharedLyrics ? 'bg-indigo-600 text-white' : 'text-stone-600 hover:text-stone-900'}`}
                     >
                       {language === 'zh' ? '歌詞' : 'Lyrics'}
                     </button>

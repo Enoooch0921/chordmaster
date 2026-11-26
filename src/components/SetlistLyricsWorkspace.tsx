@@ -15,6 +15,7 @@ import SongTitle from './SongTitle';
 import type { ReadingAnchor } from '../utils/lyricsReading';
 import MeasuredSlidingSelection from './ui/MeasuredSlidingSelection';
 import { AnimatedDisclosure } from './ui/InteractionMotion';
+import { useContentSwitchMotion } from '../hooks/useContentSwitchMotion';
 import type { PracticeReaderState } from '../lib/practiceLyrics';
 import PracticeControl from './PracticeControl';
 import type { PracticeTuning } from '../lib/practiceTuning';
@@ -59,6 +60,7 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
   const [optionsOpen, setOptionsOpen] = React.useState(false);
   const [paperSize, setPaperSize] = React.useState({ scale: 1, height: 1123 });
   const scrollRef = React.useRef<HTMLDivElement>(null);
+  useContentSwitchMotion(scrollRef, mode, !chartViewport);
   const paperAreaRef = React.useRef<HTMLDivElement>(null);
   const paperRef = React.useRef<HTMLDivElement>(null);
   const localAnchors = React.useRef(new Map<string, ReadingAnchor | 'last'>());
@@ -148,10 +150,10 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
         {showPractice && <div className="slw-practice" ref={setControlsHost} data-keyboard-refined/>}
         {isFocused ? <button type="button" className="slw-focus-exit" aria-label={zh ? '離開專注閱讀' : 'Exit focused reading'} onClick={() => changeFocus(false)}><Minimize2 size={20} aria-hidden="true"/><span>{zh ? '離開專注' : 'Exit focus'}</span></button> : mode === 'reading' && <button ref={focusTriggerRef} type="button" className="slw-focus" disabled={!current} aria-label={zh ? '專注閱讀' : 'Focus reading'} onClick={() => changeFocus(true)}><Maximize2 size={18} aria-hidden="true"/><span>{zh ? '專注閱讀' : 'Focus'}</span></button>}
       </div>
-      {mode === 'print' && <div className="slw-print-actions">
+      <AnimatedDisclosure open={mode === 'print'}><div className="slw-print-actions">
         <label>{zh ? 'A4 版面' : 'A4 layout'}<select aria-label={zh ? 'A4 版面' : 'A4 layout'} value={printSettings.layout ?? 'readable'} onChange={event => onPrintSettingsChange({ ...printSettings, layout: event.target.value as LyricsBookSettings['layout'] })}><option value="readable">{zh ? '易讀版' : 'Readable'}</option><option value="compact">{zh ? '省紙版' : 'Compact'}</option></select></label>
         {onExport && <button type="button" className="slw-export" disabled={!entries.length} onClick={onExport}><Download size={18} aria-hidden="true"/>{zh ? `匯出 A4 ${printSettings.layout === 'compact' ? '省紙版' : '易讀版'}` : `Export A4 ${printSettings.layout === 'compact' ? 'compact' : 'readable'}`}</button>}
-      </div>}
+      </div></AnimatedDisclosure>
       <AnimatedDisclosure open={optionsOpen && mode !== 'edit'}><div className="slw-options" id={optionsId}>
         {mode === 'reading' && <div className="slw-font-controls" role="group" aria-label={zh ? '閱讀字級' : 'Reading size'}>
           <span className="slw-size-label">{zh ? '本曲字級' : 'Song size'}</span>

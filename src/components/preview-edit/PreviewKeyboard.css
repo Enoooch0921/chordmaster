@@ -348,10 +348,6 @@
 @media (hover: hover) {
   .reader-audition-toggle:hover, .reader-audition .reader-audition-close:hover { background: var(--color-surface-sunken, #f3f4f6); }
 }
-@media (prefers-reduced-motion: no-preference) {
-  .reader-audition-controls { animation: reader-audition-open 140ms ease-out; }
-  @keyframes reader-audition-open { from { opacity: 0; } to { opacity: 1; } }
-}
 .reader-audition {
   container-type: inline-size; --reader-hit: 32px; --keyboard-button-shadow: none;
   padding: 0 8px; background: var(--color-surface, #fff);

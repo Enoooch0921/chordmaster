@@ -25,8 +25,9 @@ import { usePreviewKeyboardVisibility } from './hooks/usePreviewKeyboardVisibili
 import { SwipeActionGroup, SwipeActionRow } from './components/SwipeActionRow';
 import { canCloseBar, isClosedBar } from './utils/closedBar';
 import { AnimatedDisclosure, AnimatedPopover, PresenceSurface, PresenceBackdrop } from './components/ui/InteractionMotion';
+import { AppDialogProvider, useAppDialog } from './components/ui/AppDialogProvider';
 import { useUiMotion } from './hooks/useUiMotion';
-import { UI_DRAWER_EASE, UI_EASE_OUT, backdropVariants, modalVariants, drawerVariants, notificationVariants, popoverVariants } from './lib/uiMotion';
+import { UI_DRAWER_EASE, UI_EASE_OUT, backdropVariants, modalVariants, drawerVariants, notificationVariants, popoverVariants, floatingActionVariants } from './lib/uiMotion';
 import SetlistSongActions from './components/SetlistSongActions';
 import './components/SongLibraryPanel.css';
 import ProjectManagementPanel, { ManagementActions, MembersButton, MembersPanel } from './components/ProjectManagementPanel';
@@ -213,7 +214,7 @@ import {
   resolveSetlistSongCapo
 } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { ArrowLeftRight, Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogIn, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Folder, Guitar, Check, Minus, Keyboard, Pin, PinOff } from 'lucide-react';
+import { ArrowLeftRight, Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, FileDown, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogIn, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Folder, FolderInput, Guitar, Check, Minus, Keyboard, Pin, PinOff } from 'lucide-react';
 import { motion, AnimatePresence, useAnimationControls } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -314,6 +315,7 @@ const SELECTED_SONG_BY_LIBRARY_STORAGE_KEY = 'chordmaster.selected-song-id-by-li
 const SELECTED_SETLIST_STORAGE_KEY = 'chordmaster.selected-setlist-id.v1';
 const SELECTED_SETLIST_SONG_STORAGE_KEY = 'chordmaster.selected-setlist-song-id.v1';
 const SETLIST_SORT_STORAGE_KEY = 'chordmaster.setlist-sort.v1';
+const CLOUD_SETLIST_SONG_REMOVAL_LIMIT = 50;
 const LIBRARY_SORT_STORAGE_KEY = 'chordmaster.library-sort.v1';
 const WORKSPACE_MODE_STORAGE_KEY = 'chordmaster.workspace-mode.v1';
 const JOINED_SETLIST_DISPLAY_PREFERENCES_STORAGE_KEY = 'chordmaster.joined-setlist-display-preferences.v1';
@@ -1488,9 +1490,9 @@ export default function App() {
   }, []);
   if (error) throw error;
   return workspace
-    ? <WorkspaceApp key={selectedWorkspace?.revision ?? 0} auth={auth} initialWorkspace={workspace}
+    ? <AppDialogProvider><WorkspaceApp key={selectedWorkspace?.revision ?? 0} auth={auth} initialWorkspace={workspace}
         startupCache={selectedWorkspace?.cache ?? startupCache} selectedSource={selectedWorkspace?.source}
-        onOpenLibrary={(cache, source) => setSelectedWorkspace(current => ({ cache, source, revision: (current?.revision ?? 0) + 1 }))} />
+        onOpenLibrary={(cache, source) => setSelectedWorkspace(current => ({ cache, source, revision: (current?.revision ?? 0) + 1 }))} /></AppDialogProvider>
     : <AppLoadingScreen />;
 }
 
@@ -1498,6 +1500,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
   initialWorkspace: WorkspaceSnapshot; startupCache: CloudWorkspaceCache | null; auth: ReturnType<typeof useSupabaseAuth>;
   selectedSource?: 'cache' | 'server'; onOpenLibrary: (cache: CloudWorkspaceCache, source: 'cache' | 'server') => void;
 }) {
+  const appDialog = useAppDialog();
   const {
     user: rawAuthenticatedUser,
     session,
@@ -1578,10 +1581,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
   const previousReducedMotion = useRef(uiMotion.reduced);
   const reducedPreferenceChanged = previousReducedMotion.current !== uiMotion.reduced;
   React.useLayoutEffect(() => { previousReducedMotion.current = uiMotion.reduced; }, [uiMotion.reduced]);
-  const backdropMotion = { custom: uiMotion, variants: backdropVariants, initial: 'hidden', animate: 'visible', exit: 'exit' };
-  const modalMotion = { custom: uiMotion, variants: modalVariants, initial: 'hidden', animate: 'visible', exit: 'exit' };
-  const drawerMotion = { custom: uiMotion, variants: drawerVariants, initial: 'hidden', animate: 'visible', exit: 'exit' };
-  const feedbackMotion = { custom: uiMotion, variants: notificationVariants, initial: 'hidden', animate: 'visible', exit: 'exit' };
+  const backdropMotion = { custom: uiMotion, variants: backdropVariants, initial: uiMotion.instant ? false as const : 'hidden' as const, animate: 'visible' as const, exit: 'exit' as const };
+  const modalMotion = { custom: uiMotion, variants: modalVariants, initial: uiMotion.instant ? false as const : 'hidden' as const, animate: 'visible' as const, exit: 'exit' as const };
+  const drawerMotion = { custom: uiMotion, variants: drawerVariants, initial: uiMotion.instant ? false as const : 'hidden' as const, animate: 'visible' as const, exit: 'exit' as const };
+  const feedbackMotion = { custom: uiMotion, variants: notificationVariants, initial: uiMotion.instant ? false as const : 'hidden' as const, animate: 'visible' as const, exit: 'exit' as const };
+  const floatingMotion = { custom: uiMotion, variants: floatingActionVariants, initial: uiMotion.instant ? false as const : 'hidden' as const, animate: 'visible' as const, exit: 'exit' as const };
   const initialWorkspaceRef = useRef<WorkspaceSnapshot | null>(null);
   const initialWorkspace = initialWorkspaceRef.current ?? (cacheIdentityEligible ? startupCache!.workspace : restoredWorkspace);
   initialWorkspaceRef.current = initialWorkspace;
@@ -2615,9 +2619,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-indigo-950/40'
       : `border border-gray-200 bg-white text-gray-600 hover:border-indigo-200 hover:text-indigo-600 ${toolbarSurfaceDark}`
   }`;
-  const desktopToolbarActionClassName = `inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2.5 text-[13px] font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
-  const desktopToolbarPrimaryActionClassName = `inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-gray-900 px-2.5 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-gray-800 ${toolbarEmphasisDark}`;
-  const desktopToolbarToggleClassName = (active: boolean, tone: 'neutral' | 'accent' = 'neutral') => `inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 text-[13px] font-semibold shadow-sm transition-colors ${
+  const desktopToolbarActionClassName = `ui-press inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2.5 text-[13px] font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
+  const desktopToolbarPrimaryActionClassName = `ui-press inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-gray-900 px-2.5 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-gray-800 ${toolbarEmphasisDark}`;
+  const desktopToolbarToggleClassName = (active: boolean, tone: 'neutral' | 'accent' = 'neutral') => `ui-press inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 text-[13px] font-semibold shadow-sm transition-colors ${
     active
       ? tone === 'accent'
         ? `border-amber-200 bg-amber-50 text-amber-700 ${toolbarToggleActiveAccentDark}`
@@ -2628,14 +2632,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
   const denseToolbarShowsLabels = mainViewportWidth >= 1680;
   const denseToolbarActionClassName = denseToolbarShowsLabels
     ? desktopToolbarActionClassName
-    : `inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
+    : `ui-press inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
   const denseToolbarPrimaryActionClassName = denseToolbarShowsLabels
     ? desktopToolbarPrimaryActionClassName
-    : `inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-900 text-white shadow-sm transition-colors hover:bg-gray-800 ${toolbarEmphasisDark}`;
+    : `ui-press inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-900 text-white shadow-sm transition-colors hover:bg-gray-800 ${toolbarEmphasisDark}`;
   const denseToolbarToggleClassName = (active: boolean, tone: 'neutral' | 'accent' = 'neutral') => (
     denseToolbarShowsLabels
       ? desktopToolbarToggleClassName(active, tone)
-      : `inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border shadow-sm transition-colors ${
+      : `ui-press inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border shadow-sm transition-colors ${
           active
             ? tone === 'accent'
               ? `border-amber-200 bg-amber-50 text-amber-700 ${toolbarToggleActiveAccentDark}`
@@ -2643,12 +2647,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
             : `border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`
         }`
   );
-  const denseToolbarMenuButtonClassName = `inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
+  const denseToolbarMenuButtonClassName = `ui-press inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
   const handwritingLabel = language === 'zh' ? '手寫筆記' : 'Handwritten notes';
   const compactLyricsToggleLabel = language === 'zh' ? '歌詞' : 'Lyrics';
   const compactSaveLabel = language === 'zh' ? '儲存' : 'Save';
   const compactPdfLabel = language === 'zh' ? 'PDF' : 'PDF';
-  const mobileTopbarActionBaseClassName = 'flex h-10 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold shadow-sm transition-colors';
+  const mobileTopbarActionBaseClassName = 'ui-press flex h-10 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold shadow-sm transition-colors';
   const mobileTopbarToggleChipClassName = (active: boolean, tone: 'neutral' | 'accent' = 'neutral') => {
     if (active) {
       return `${mobileTopbarActionBaseClassName} ${
@@ -2671,7 +2675,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
 
     return `${mobileTopbarActionBaseClassName} border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
   };
-  const inlineModeBadgeClassName = (active: boolean) => `inline-flex min-w-[28px] items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] font-black leading-none ${
+  const inlineModeBadgeClassName = (active: boolean) => `inline-flex min-w-[28px] items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] font-bold tabular-nums leading-none ${
     active
       ? 'border-indigo-200 bg-white/70 text-current'
       : 'border-gray-200 bg-gray-50 text-gray-600'
@@ -2732,6 +2736,22 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
   ) : null;
   const toolbarOverflowPanel = (
     <AnimatedPopover open={isToolbarOverflowMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-60 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface-raised)]">
+      {isAuthenticated ? (
+        <>
+          <div role="status" className={`flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-semibold ${
+            syncStatus === 'failed'
+              ? 'bg-rose-50 text-rose-700'
+              : isOfflineMode
+                ? 'bg-amber-50 text-amber-700'
+                : 'bg-emerald-50 text-emerald-700'
+          }`}>
+            {isOfflineMode ? <CloudOff size={13} /> : <Cloud size={13} />}
+            <span className="truncate">{syncStatusLabel}</span>
+          </div>
+          <div role="separator" className="my-1.5 border-t border-gray-100 dark:border-[color:var(--color-border)]" />
+        </>
+      ) : null}
+
       {homeScreenInstallMenuItem}
       <button
         type="button"
@@ -2739,10 +2759,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
           handleSaveLibrary();
           setIsToolbarOverflowMenuOpen(false);
         }}
-        className={`mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+        className={`ui-press flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
           workspaceIsDirty
             ? 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)]'
+            : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)]'
         }`}
       >
         <Save size={14} />
@@ -2756,29 +2776,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
           setIsToolbarOverflowMenuOpen(false);
         }}
         disabled={isExportingPdf}
-        className={`mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+        className={`ui-press mt-0.5 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
           isExportingPdf
             ? 'cursor-wait bg-gray-100 text-gray-400'
-            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)]'
+            : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text)] dark:hover:bg-[color:var(--color-surface)]'
         }`}
       >
-        <Save size={14} />
+        <FileDown size={14} />
         <span>{isExportingPdf ? copy.preparingPdf : isSetlistMode ? copy.exportSetlistPdf : copy.exportPdf}</span>
       </button>
 
       {isAuthenticated ? (
         <>
-          <div className={`mt-1 flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${
-            syncStatus === 'failed'
-              ? 'bg-rose-50 text-rose-700'
-              : isOfflineMode
-                ? 'bg-amber-50 text-amber-700'
-                : 'bg-emerald-50 text-emerald-700'
-          }`}>
-            {isOfflineMode ? <CloudOff size={14} /> : <Cloud size={14} />}
-            <span>{syncStatusLabel}</span>
-          </div>
-
           {activeAppView === 'sheet' && !isSetlistMode && hasSongs && (!isTeamWorkspace || canEditTeamSongs) && (
             <button
               type="button"
@@ -2786,7 +2795,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                 void handleCreateShareLink('song');
                 setIsToolbarOverflowMenuOpen(false);
               }}
-              className="ui-press mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)]"
+              className="ui-press mt-0.5 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text)] dark:hover:bg-[color:var(--color-surface)]"
             >
               <Share2 size={14} />
               <span>{copy.shareCurrentSong}</span>
@@ -2800,7 +2809,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                 void handleCreateShareLink('setlist');
                 setIsToolbarOverflowMenuOpen(false);
               }}
-              className="ui-press mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)]"
+              className="ui-press mt-0.5 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text)] dark:hover:bg-[color:var(--color-surface)]"
             >
               <Share2 size={14} />
               <span>{copy.shareCurrentSetlist}</span>
@@ -2815,16 +2824,17 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
             setIsToolbarOverflowMenuOpen(false);
           }}
           disabled={!isAuthConfigured}
-          className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
+          className="ui-press mt-0.5 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text)] dark:hover:bg-[color:var(--color-surface)] disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ExternalLink size={14} />
           <span>{copy.continueWithGoogle}</span>
         </button>
       ) : null}
 
-
       {renderGuitaristModeToggle(true)}
-      <div className="mt-1 grid grid-cols-3 gap-1 rounded-xl bg-gray-50 p-1 dark:bg-[color:var(--color-surface-sunken)]">
+      <div role="separator" className="my-1.5 border-t border-gray-100 dark:border-[color:var(--color-border)]" />
+
+      <div className="grid grid-cols-3 gap-1 rounded-xl bg-gray-100 p-1 dark:bg-[color:var(--color-surface-sunken)]">
         {([
           { value: 'light', icon: Sun, label: language === 'zh' ? '淺色' : 'Light' },
           { value: 'dark', icon: Moon, label: language === 'zh' ? '深色' : 'Dark' },
@@ -2838,10 +2848,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
               onClick={() => setThemeMode(value)}
               aria-pressed={isActive}
               aria-label={label}
-              className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-bold transition-colors ${
+              className={`ui-press flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold transition-colors ${
                 isActive
-                  ? 'bg-gray-900 text-white dark:bg-[color:var(--color-surface-raised)] dark:text-[color:var(--color-text)]'
-                  : 'text-gray-600 hover:bg-white dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)]'
+                  ? 'bg-white text-indigo-700 shadow-sm dark:bg-[color:var(--color-surface-raised)] dark:text-indigo-200'
+                  : 'text-gray-600 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:text-[color:var(--color-text)]'
               }`}
             >
               <Icon size={14} />
@@ -2851,31 +2861,27 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         })}
       </div>
 
-      <div className="mt-1 grid grid-cols-2 gap-1 rounded-xl bg-gray-50 p-1 dark:bg-[color:var(--color-surface-sunken)]">
+      <div className="mt-1.5 grid grid-cols-2 gap-1 rounded-xl bg-gray-100 p-1 dark:bg-[color:var(--color-surface-sunken)]">
         <button
           type="button"
-          onClick={() => {
-            setLanguage('zh');
-            setIsToolbarOverflowMenuOpen(false);
-          }}
-          className={`rounded-lg px-2.5 py-2 text-xs font-bold transition-colors ${
+          onClick={() => setLanguage('zh')}
+          aria-pressed={language === 'zh'}
+          className={`ui-press rounded-lg px-2.5 py-2 text-xs font-semibold transition-colors ${
             language === 'zh'
-              ? 'bg-gray-900 text-white dark:bg-[color:var(--color-surface-raised)] dark:text-[color:var(--color-text)]'
-              : 'text-gray-600 hover:bg-white dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)]'
+              ? 'bg-white text-indigo-700 shadow-sm dark:bg-[color:var(--color-surface-raised)] dark:text-indigo-200'
+              : 'text-gray-600 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:text-[color:var(--color-text)]'
           }`}
         >
           中文
         </button>
         <button
           type="button"
-          onClick={() => {
-            setLanguage('en');
-            setIsToolbarOverflowMenuOpen(false);
-          }}
-          className={`rounded-lg px-2.5 py-2 text-xs font-bold transition-colors ${
+          onClick={() => setLanguage('en')}
+          aria-pressed={language === 'en'}
+          className={`ui-press rounded-lg px-2.5 py-2 text-xs font-semibold transition-colors ${
             language === 'en'
-              ? 'bg-gray-900 text-white dark:bg-[color:var(--color-surface-raised)] dark:text-[color:var(--color-text)]'
-              : 'text-gray-600 hover:bg-white dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)]'
+              ? 'bg-white text-indigo-700 shadow-sm dark:bg-[color:var(--color-surface-raised)] dark:text-indigo-200'
+              : 'text-gray-600 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:text-[color:var(--color-text)]'
           }`}
         >
           EN
@@ -3648,6 +3654,31 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
   const historyRenameGroup = useRef<string | undefined>(undefined);
   const historyReplay = useRef(false);
   const [historyForwardBusy, setHistoryForwardBusy] = useState(false);
+  const setlistSongSelectionKey = canEditSelectedSetlist && isSetlistMode && !isPerformanceMode
+    && setlistPanelView === 'detail' && selectedSetlist
+    ? JSON.stringify([historyScope, selectedSetlist.id]) : null;
+  const [setlistSongSelection, setSetlistSongSelection] = useState<{ key: string; ids: Set<string> } | null>(null);
+  const setlistSongSelectionActive = Boolean(setlistSongSelectionKey && setlistSongSelection?.key === setlistSongSelectionKey);
+  const selectedSetlistSongEntries = setlistSongSelectionActive
+    ? setlistSongsWithSource.filter(({ item }) => setlistSongSelection?.ids.has(item.id)) : [];
+  const setlistSongRemovalInFlight = useRef(false);
+  const setlistSongSelectionTrigger = useRef<HTMLButtonElement>(null);
+  const setlistAddSongsTrigger = useRef<HTMLButtonElement>(null);
+  const firstSetlistSongCheckbox = useRef<HTMLInputElement>(null);
+  const setlistSongSelectionFocus = useRef<'first' | 'trigger' | null>(null);
+  useEffect(() => {
+    setSetlistSongSelection(current => current?.key === setlistSongSelectionKey ? current : null);
+  }, [setlistSongSelectionKey]);
+  useLayoutEffect(() => {
+    if (historyForwardBusy) return;
+    const target = setlistSongSelectionActive
+      ? setlistSongSelectionFocus.current === 'first' ? firstSetlistSongCheckbox.current : null
+      : setlistSongSelectionFocus.current === 'trigger'
+        ? setlistSongSelectionTrigger.current ?? setlistAddSongsTrigger.current
+        : null;
+    setlistSongSelectionFocus.current = null;
+    target?.focus({ preventScroll: !setlistSongSelectionActive });
+  }, [historyForwardBusy, setlistSongSelectionActive]);
   const joinedHistoryWork = useRef({ scope: historyScope, pending: 0, queue: Promise.resolve() });
   useEffect(() => {
     joinedHistoryWork.current = { scope: historyScope, pending: 0, queue: Promise.resolve() };
@@ -3719,6 +3750,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         : `${direction === 'undo' ? 'Undid' : 'Redid'} ${entry.label.en}`, { id: historyFeedbackId, placement: 'history' });
     }
   });
+  const getSetlistSongRemovalKey = useStableEvent(() => (
+    historyForwardBusy || globalHistory.busy || isSwitchingLibrary || isLoadingCloudWorkspace
+      ? null : setlistSongSelectionKey
+  ));
   const recordHistory = (zh: string, en: string, changes: WorkspaceHistoryChange[], group?: string,
     deletion?: Pick<WorkspaceHistoryEntry, 'trashId' | 'trashResource' | 'trashResources' | 'inverseTrash'>) => {
     if (historyReplay.current) return null;
@@ -4060,9 +4095,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       previousLibraryId && revokedLibraryIdsRef.current.has(previousLibraryId)
     );
     if (isLeavingRevokedLibrary && workspaceIsDirty) {
-      const confirmed = window.confirm(language === 'zh'
-        ? '你已失去這個團隊的存取權；未儲存修改目前只保留在畫面上。切換曲庫會捨棄這些修改，確定要繼續嗎？'
-        : 'You no longer have access to this team. Unsaved edits only remain on this screen. Switching libraries will discard them. Continue?');
+      const confirmed = await appDialog.confirm({
+        title: language === 'zh' ? '捨棄未儲存修改？' : 'Discard unsaved edits?',
+        message: language === 'zh'
+          ? '你已失去這個團隊的存取權；未儲存修改目前只保留在畫面上。切換曲庫會捨棄這些修改，確定要繼續嗎？'
+          : 'You no longer have access to this team. Unsaved edits only remain on this screen. Switching libraries will discard them. Continue?',
+        confirmLabel: language === 'zh' ? '捨棄並切換' : 'Discard and switch',
+        cancelLabel: copy.cancel,
+        tone: 'danger',
+      });
       if (!confirmed) return;
     }
     if (workspaceIsDirty && !isLeavingRevokedLibrary && !isAutoSaveEnabled && !decision) {
@@ -4357,7 +4398,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     if (!repository || !activeCloudLibrary || !canManageActiveTeam) return;
     const target = teamManagement?.members.find((member) => member.userId === userId);
     if (!target || !canManageTeamMember(activeLibraryRole, target.role)) return;
-    const confirmed = window.confirm(language === 'zh' ? '要移除此團隊成員嗎？' : 'Remove this team member?');
+    const confirmed = await appDialog.confirm({
+      title: language === 'zh' ? '移除團隊成員' : 'Remove team member',
+      message: language === 'zh' ? '要移除此團隊成員嗎？' : 'Remove this team member?',
+      confirmLabel: language === 'zh' ? '移除成員' : 'Remove',
+      cancelLabel: copy.cancel,
+      tone: 'danger',
+    });
     if (!confirmed) return;
     setTeamManagementError(null);
     try {
@@ -4836,9 +4883,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       toast.error(language === 'zh' ? '你沒有刪除這個專案的權限。' : 'You do not have permission to delete this project.');
       return;
     }
-    const confirmed = window.confirm(language === 'zh'
-      ? '要刪除這個專案嗎？裡面的歌單會移至最外層，可用「撤銷」恢復專案與原本分類。'
-      : 'Delete this project? Its setlists will move to the root. Undo restores the project and its original grouping.');
+    const confirmed = await appDialog.confirm({
+      title: language === 'zh' ? '刪除專案' : 'Delete project',
+      message: language === 'zh'
+        ? '要刪除這個專案嗎？裡面的歌單會移至最外層，可用「撤銷」恢復專案與原本分類。'
+        : 'Delete this project? Its setlists will move to the root. Undo restores the project and its original grouping.',
+      confirmLabel: language === 'zh' ? '刪除專案' : 'Delete project',
+      cancelLabel: copy.cancel,
+      tone: 'danger',
+    });
     if (!confirmed) return;
     // Detach any setlists pointing at this project so they fall back to "Ungrouped".
     const nextSetlists = setlists.map((item) =>
@@ -5099,9 +5152,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       toast.error(language === 'zh' ? '你沒有刪除某些歌單的權限。' : 'You do not have permission to delete some of these setlists.');
       return;
     }
-    const confirmed = window.confirm(language === 'zh'
-      ? `要刪除選取的 ${targets.length} 份歌單嗎？可用「撤銷」整批恢復。`
-      : `Delete ${targets.length} selected setlist${targets.length === 1 ? '' : 's'}? Undo restores the entire batch.`);
+    const confirmed = await appDialog.confirm({
+      title: language === 'zh' ? '刪除選取歌單' : 'Delete selected setlists',
+      message: language === 'zh'
+        ? `要刪除選取的 ${targets.length} 份歌單嗎？可用「撤銷」整批恢復。`
+        : `Delete ${targets.length} selected setlist${targets.length === 1 ? '' : 's'}? Undo restores the entire batch.`,
+      confirmLabel: language === 'zh' ? '刪除歌單' : 'Delete',
+      cancelLabel: copy.cancel,
+      tone: 'danger',
+    });
     if (!confirmed) return;
     const targetIds = new Set(ids);
     const repository = cloudRepositoryRef.current;
@@ -5357,7 +5416,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
   ) => {
     const repository = cloudRepositoryRef.current;
     if (!repository || removingMemberKey) return;
-    if (!window.confirm(copy.removeMemberConfirm)) return;
+    const confirmed = await appDialog.confirm({
+      title: language === 'zh' ? '移除共享成員' : 'Remove member',
+      message: copy.removeMemberConfirm,
+      confirmLabel: language === 'zh' ? '移除成員' : 'Remove',
+      cancelLabel: copy.cancel,
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     setRemovingMemberKey(`${resourceType}:${resourceId}:${participant.userId}`);
     try {
       await repository.removeSharedMember(resourceType, resourceId, participant.userId);
@@ -5715,6 +5781,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       }}
       onOpen={(notification) => void handleOpenNotification(notification)}
       onMarkAllRead={handleMarkAllNotificationsRead}
+      buttonClassName={isPhoneViewport ? 'h-10 w-10 rounded-xl shadow-sm' : 'h-9 w-9 rounded-full'}
     />
   ) : null;
 
@@ -5796,7 +5863,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       toast.error(language === 'zh' ? '你沒有刪除這份團隊歌單的權限。' : 'You do not have permission to delete this team setlist.');
       return;
     }
-    const confirmed = window.confirm(language === 'zh' ? '要刪除這份歌單嗎？可用「撤銷」恢復歌曲與共享設定。' : 'Delete this setlist? Undo restores its songs and sharing settings.');
+    const confirmed = await appDialog.confirm({
+      title: language === 'zh' ? '刪除歌單' : 'Delete setlist',
+      message: language === 'zh' ? '要刪除這份歌單嗎？可用「撤銷」恢復歌曲與共享設定。' : 'Delete this setlist? Undo restores its songs and sharing settings.',
+      confirmLabel: language === 'zh' ? '刪除歌單' : 'Delete setlist',
+      cancelLabel: copy.cancel,
+      tone: 'danger',
+    });
     if (!confirmed) {
       return;
     }
@@ -6061,9 +6134,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       toast.info(language === 'zh' ? '沒有發現重複歌曲' : 'No duplicate songs found');
       return;
     }
-    if (!window.confirm(language === 'zh'
-      ? `要封存已選 ${selectedLibrarySongs.length} 首中的 ${duplicateIds.length} 首相同副本嗎？既有歌單保留原本引用，可用撤銷恢復。`
-      : `Archive ${duplicateIds.length} identical copies among ${selectedLibrarySongs.length} selected songs? Existing setlist references are preserved. You can undo this.`)) return;
+    const confirmed = await appDialog.confirm({
+      title: language === 'zh' ? '封存重複歌曲' : 'Archive duplicates',
+      message: language === 'zh'
+        ? `要封存已選 ${selectedLibrarySongs.length} 首中的 ${duplicateIds.length} 首相同副本嗎？既有歌單保留原本引用，可用撤銷恢復。`
+        : `Archive ${duplicateIds.length} identical copies among ${selectedLibrarySongs.length} selected songs? Existing setlist references are preserved. You can undo this.`,
+      confirmLabel: language === 'zh' ? '封存副本' : 'Archive copies',
+      cancelLabel: copy.cancel,
+    });
+    if (!confirmed) return;
     try { await updateTeamSongArchiveState(duplicateIds, true); }
     catch (error) { toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed); }
   };
@@ -6089,51 +6168,101 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     }));
   });
 
-  const handleRemoveSetlistSong = async (setlistSongId: string) => {
-    if (!selectedSetlist) {
-      return;
-    }
-    if (!canEditSelectedSetlist) {
-      return;
-    }
+  const handleRemoveSetlistSongs = async (entryIds: string[]) => {
+    const removalKey = getSetlistSongRemovalKey();
+    if (!selectedSetlist || !removalKey || setlistSongRemovalInFlight.current) return;
+    const setlistId = selectedSetlist.id;
+    const ids = new Set(entryIds);
+    const targets = selectedSetlist.songs.filter(item => ids.has(item.id));
+    if (!targets.length || targets.length !== ids.size) return;
 
-    const targetSetlistSong = selectedSetlist.songs.find((item) => item.id === setlistSongId);
-    const sourceSong = targetSetlistSong ? songs.find((item) => item.id === targetSetlistSong.songId) : undefined;
-    const songTitle = targetSetlistSong?.songData?.title || sourceSong?.title || copy.untitledSong;
-    const confirmed = window.confirm(
-      language === 'zh'
-        ? `要從歌單移出「${songTitle}」嗎？`
-        : `Remove "${songTitle}" from this setlist?`
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    if (!targetSetlistSong || historyForwardBusy) return;
     const repository = cloudRepositoryRef.current;
     const requestScope = historyScope;
-    let trashId: string | undefined;
-    if (repository) {
-      if (!navigator.onLine) { toast.error(language === 'zh' ? '請連線後再移出雲端歌曲。' : 'Go online to remove a cloud song entry.'); return; }
-      const release = beginCloudMutation(); setHistoryForwardBusy(true);
-      try {
-        await persistHistoryBaseline.current(songs, setlists, projects);
-        trashId = await repository.trashWorkspaceResource('entry', setlistSongId, { ...targetSetlistSong });
-        if (historyLive.current.scope !== requestScope || cloudRepositoryRef.current !== repository) return;
-        setSavedSetlists(current => current.map(list => list.id === selectedSetlist.id ? { ...list, songs: reindexSetlistSongs(list.songs.filter(item => item.id !== setlistSongId)) } : list));
-      } catch (error) { toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed); return; }
-      finally { release(); setHistoryForwardBusy(false); }
+    const count = targets.length;
+    if (repository && count > CLOUD_SETLIST_SONG_REMOVAL_LIMIT) {
+      toast.error(language === 'zh'
+        ? `雲端歌單每次最多移出 ${CLOUD_SETLIST_SONG_REMOVAL_LIMIT} 首，請減少選取後再試。`
+        : `Remove up to ${CLOUD_SETLIST_SONG_REMOVAL_LIMIT} songs at a time from a cloud setlist. Deselect some songs and try again.`);
+      return;
     }
-    const remainingSongs = reindexSetlistSongs(selectedSetlist.songs.filter((item) => item.id !== setlistSongId));
-    recordHistory('移出歌曲', 'song removal', [{ resource: 'setlist', id: selectedSetlist.id, before: selectedSetlist, after: { ...selectedSetlist, songs: remainingSongs } }], undefined,
-      { trashId, trashResource: { type: 'entry', id: setlistSongId } });
 
-    replaceSetlist(selectedSetlist.id, (currentSetlist) => ({
-      ...currentSetlist,
-      songs: currentSetlist.songs.filter((item) => item.id !== setlistSongId)
-    }));
+    const target = targets[0];
+    const songTitle = target.songData?.title || getSetlistSongSource(target)?.title || copy.untitledSong;
+    const removeEntries = (list: Setlist) => ({
+      ...list, songs: reindexSetlistSongs(list.songs.filter(item => !ids.has(item.id)))
+    });
+    const inRequestScope = () => historyLive.current.scope === requestScope
+      && cloudRepositoryRef.current === repository;
+    setlistSongRemovalInFlight.current = true;
+    try {
+      const confirmed = await appDialog.confirm({
+        title: count > 1
+          ? (language === 'zh' ? `移出 ${count} 首歌曲` : `Remove ${count} songs`)
+          : copy.removeFromSetlist,
+        message: count > 1
+          ? (language === 'zh'
+            ? '要從這份歌單移出選取的歌曲嗎？歌曲會保留在歌曲庫，可用「撤銷」恢復歌單。'
+            : 'Remove the selected songs from this setlist? They stay in the song library, and you can undo this change.')
+          : (language === 'zh' ? `要從歌單移出「${songTitle}」嗎？` : `Remove "${songTitle}" from this setlist?`),
+        confirmLabel: count > 1
+          ? (language === 'zh' ? `移出 ${count} 首` : `Remove ${count} songs`)
+          : copy.removeFromSetlist,
+        cancelLabel: copy.cancel,
+        tone: 'danger',
+      });
+      if (!confirmed || !inRequestScope() || getSetlistSongRemovalKey() !== removalKey) return;
 
-    setSelectedSetlistSongId(remainingSongs[0]?.id ?? null);
+      const { songs, setlists, projects } = historyLive.current;
+      const before = setlists.find(list => list.id === setlistId);
+      if (!before) return;
+      const currentTargets = before.songs.filter(item => ids.has(item.id));
+      if (historySignature(currentTargets) !== historySignature(targets)) {
+        toast.error(language === 'zh' ? '歌單內容已變更，請重新確認選取的歌曲。' : 'The setlist changed. Review your song selection and try again.');
+        return;
+      }
+      let trashResources: NonNullable<WorkspaceHistoryEntry['trashResources']> = targets.map(item => ({ type: 'entry', id: item.id }));
+      if (repository) {
+        if (!navigator.onLine) {
+          toast.error(language === 'zh' ? '請連線後再移出雲端歌單的歌曲。' : 'Go online to remove songs from a cloud setlist.');
+          return;
+        }
+        const release = beginCloudMutation();
+        setHistoryForwardBusy(true);
+        try {
+          await persistHistoryBaseline.current(songs, setlists, projects);
+          if (!inRequestScope()) return;
+          if (count === 1) {
+            const trashId = await repository.trashWorkspaceResource('entry', target.id, { ...target });
+            trashResources = [{ type: 'entry', id: target.id, trashId }];
+          } else {
+            trashResources = await repository.trashWorkspaceResources(targets.map(item => ({
+              type: 'entry', id: item.id, expected: { ...item }
+            })));
+          }
+          if (!inRequestScope()) return;
+          setSavedSetlists(current => current.map(list => list.id === setlistId ? removeEntries(list) : list));
+        } catch (error) {
+          if (inRequestScope()) toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed);
+          return;
+        } finally {
+          release();
+          if (inRequestScope()) setHistoryForwardBusy(false);
+        }
+      }
+      const after = removeEntries(before);
+      recordHistory(count > 1 ? `移出 ${count} 首歌曲` : '移出歌曲',
+        count > 1 ? `removed ${count} songs` : 'song removal',
+        [{ resource: 'setlist', id: setlistId, before, after }], undefined, { trashResources });
+      replaceSetlist(setlistId, removeEntries);
+      if (setlistSongSelectionActive) {
+        setlistSongSelectionFocus.current = 'trigger';
+        setSetlistSongSelection(current => current?.key === removalKey ? null : current);
+      } else {
+        setSelectedSetlistSongId(after.songs[0]?.id ?? null);
+      }
+    } finally {
+      setlistSongRemovalInFlight.current = false;
+    }
   };
 
   const moveJoinedSetlistSong = (sourceId: string, targetId: string) => {
@@ -6199,7 +6328,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
 
   const { onPointerDown: handleSetlistSongDragHandlePointerDown, cancel: finishSetlistSongPointerDrag } = useSetlistSongDrag({
     enabled: canReorderSelectedSetlist && isSetlistMode && isSheetView && setlistPanelView === 'detail'
-      && !isPerformanceMode && !isSwitchingLibrary && !isLoadingCloudWorkspace,
+      && !setlistSongSelectionActive && !isPerformanceMode && !isSwitchingLibrary && !isLoadingCloudWorkspace,
     scopeKey: JSON.stringify([authenticatedUser?.id, activeLibraryId, selectedSetlist?.id, isSetlistSongSortMode]),
     items: selectedSetlist?.songs,
     onMove: moveSetlistSong,
@@ -6339,15 +6468,23 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         };
       }) as StoredSong[];
 
-      const confirmed = window.confirm(
-        language === 'zh'
+      const confirmed = await appDialog.confirm({
+        title: language === 'zh'
+          ? (importMode === 'append-single' ? '加入歌曲至曲庫' : '匯入並取代曲庫')
+          : (importMode === 'append-single' ? 'Add song to library' : 'Import and replace library'),
+        message: language === 'zh'
           ? importMode === 'append-single'
             ? `要將「${preparedImportedSongs[0].title}」加入目前的 Song Library 嗎？\n\n現有歌曲與歌單都會保留。`
             : `要匯入 ${preparedImportedSongs.length} 首歌並取代目前的 Song Library 嗎？`
           : importMode === 'append-single'
             ? `Add “${preparedImportedSongs[0].title}” to the current Song Library?\n\nExisting songs and setlists will be kept.`
-            : `Import ${preparedImportedSongs.length} songs and replace the current Song Library?`
-      );
+            : `Import ${preparedImportedSongs.length} songs and replace the current Song Library?`,
+        confirmLabel: language === 'zh'
+          ? (importMode === 'append-single' ? '加入歌曲' : '匯入並取代')
+          : (importMode === 'append-single' ? 'Add song' : 'Import and replace'),
+        cancelLabel: copy.cancel,
+        tone: importMode === 'append-single' ? 'default' : 'danger',
+      });
       if (!confirmed) {
         return;
       }
@@ -7057,11 +7194,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     }
 
     const sourceName = targetSong.teamSource.libraryName ?? (language === 'zh' ? '團隊來源' : 'team source');
-    const confirmed = window.confirm(
-      language === 'zh'
+    const confirmed = await appDialog.confirm({
+      title: language === 'zh' ? '同步團隊最新版' : 'Sync latest team version',
+      message: language === 'zh'
         ? `要把「${targetSong.title || copy.untitledSong}」同步到「${sourceName}」的最新版嗎？\n\n會保留個人副本的歌名與 capo，但譜面內容會更新成團隊版。`
-        : `Sync "${targetSong.title || copy.untitledSong}" to the latest version from "${sourceName}"?\n\nThe personal title and capo will be kept, but chart content will be replaced by the team version.`
-    );
+        : `Sync "${targetSong.title || copy.untitledSong}" to the latest version from "${sourceName}"?\n\nThe personal title and capo will be kept, but chart content will be replaced by the team version.`,
+      confirmLabel: language === 'zh' ? '同步最新版' : 'Sync latest',
+      cancelLabel: copy.cancel,
+    });
     if (!confirmed) {
       return;
     }
@@ -7199,20 +7339,36 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     }
 
     if(!isTeamWorkspace&&!targetSong.archivedAt){
-      if(!window.confirm(language==='zh'?`要封存「${targetSong.title||copy.untitledSong}」嗎？可用「撤銷」恢復，既有歌單會保留。`:`Archive "${targetSong.title||copy.untitledSong}"? Undo restores it and existing setlists stay intact.`))return;
+      const confirmedArchive = await appDialog.confirm({
+        title: language === 'zh' ? '封存歌曲' : 'Archive song',
+        message: language==='zh'?`要封存「${targetSong.title||copy.untitledSong}」嗎？可用「撤銷」恢復，既有歌單會保留。`:`Archive "${targetSong.title||copy.untitledSong}"? Undo restores it and existing setlists stay intact.`,
+        confirmLabel: language === 'zh' ? '封存歌曲' : 'Archive',
+        cancelLabel: copy.cancel,
+      });
+      if(!confirmedArchive)return;
       try{await updateTeamSongArchiveState([songId],true);}catch(error){toast.error(error instanceof Error?error.message:copy.cloudSyncFailed);}
       return;
     }
 
     if (isTeamWorkspace) {
       const isArchived = Boolean(targetSong.archivedAt);
-      const confirmed = window.confirm(isArchived
-        ? (language === 'zh'
-          ? `要永久刪除「${targetSong.title || copy.untitledSong}」嗎？\n\n只有沒有任何歌單或有效分享引用時才能刪除。此操作無法撤銷，並會清除本工作區的撤銷記錄。`
-          : `Permanently delete "${targetSong.title || copy.untitledSong}"?\n\nDeletion is allowed only when no setlist or active share still references it. This cannot be undone and clears this workspace’s undo history.`)
-        : (language === 'zh'
-          ? `要封存「${targetSong.title || copy.untitledSong}」嗎？\n\n它會從曲庫與新增歌曲搜尋中隱藏，但既有歌單仍可顯示。`
-          : `Archive "${targetSong.title || copy.untitledSong}"?\n\nIt will be hidden from library and add-song search, while existing setlists keep working.`));
+      const confirmed = await appDialog.confirm({
+        title: isArchived
+          ? (language === 'zh' ? '永久刪除歌曲' : 'Permanently delete song')
+          : (language === 'zh' ? '封存歌曲' : 'Archive song'),
+        message: isArchived
+          ? (language === 'zh'
+            ? `要永久刪除「${targetSong.title || copy.untitledSong}」嗎？\n\n只有沒有任何歌單或有效分享引用時才能刪除。此操作無法撤銷，並會清除本工作區的撤銷記錄。`
+            : `Permanently delete "${targetSong.title || copy.untitledSong}"?\n\nDeletion is allowed only when no setlist or active share still references it. This cannot be undone and clears this workspace’s undo history.`)
+          : (language === 'zh'
+            ? `要封存「${targetSong.title || copy.untitledSong}」嗎？\n\n它會從曲庫與新增歌曲搜尋中隱藏，但既有歌單仍可顯示。`
+            : `Archive "${targetSong.title || copy.untitledSong}"?\n\nIt will be hidden from library and add-song search, while existing setlists keep working.`),
+        confirmLabel: isArchived
+          ? (language === 'zh' ? '永久刪除' : 'Delete permanently')
+          : (language === 'zh' ? '封存歌曲' : 'Archive'),
+        cancelLabel: copy.cancel,
+        tone: isArchived ? 'danger' : 'default',
+      });
       if (!confirmed) return;
 
       try {
@@ -7227,11 +7383,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       return;
     }
 
-    const confirmed = window.confirm(
-      language === 'zh'
+    const confirmed = await appDialog.confirm({
+      title: language === 'zh' ? '永久刪除歌曲' : 'Permanently delete song',
+      message: language === 'zh'
         ? `要永久刪除「${targetSong.title || copy.untitledSong}」嗎？這會移除歌單引用，無法撤銷，並會清除本工作區的撤銷記錄。`
-        : `Permanently delete "${targetSong.title || copy.untitledSong}" and its setlist references? This cannot be undone and clears this workspace’s undo history.`
-    );
+        : `Permanently delete "${targetSong.title || copy.untitledSong}" and its setlist references? This cannot be undone and clears this workspace’s undo history.`,
+      confirmLabel: language === 'zh' ? '永久刪除' : 'Delete permanently',
+      cancelLabel: copy.cancel,
+      tone: 'danger',
+    });
     if (!confirmed) {
       return;
     }
@@ -7262,9 +7422,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
 
   const handleArchiveSelectedSongs = async (archived: boolean) => {
     if (selectedLibrarySongIds.length === 0) return;
-    const confirmed = window.confirm(language === 'zh'
-      ? `要${archived ? '封存' : '取消封存'}選取的 ${selectedLibrarySongIds.length} 首歌曲嗎？`
-      : `${archived ? 'Archive' : 'Restore'} ${selectedLibrarySongIds.length} selected song${selectedLibrarySongIds.length === 1 ? '' : 's'}?`);
+    const confirmed = await appDialog.confirm({
+      title: language === 'zh' ? (archived ? '封存選取歌曲' : '取消封存歌曲') : (archived ? 'Archive selected songs' : 'Restore selected songs'),
+      message: language === 'zh'
+        ? `要${archived ? '封存' : '取消封存'}選取的 ${selectedLibrarySongIds.length} 首歌曲嗎？`
+        : `${archived ? 'Archive' : 'Restore'} ${selectedLibrarySongIds.length} selected song${selectedLibrarySongIds.length === 1 ? '' : 's'}?`,
+      confirmLabel: language === 'zh' ? (archived ? '封存' : '取消封存') : (archived ? 'Archive' : 'Restore'),
+      cancelLabel: copy.cancel,
+    });
     if (!confirmed) return;
     try {
       await updateTeamSongArchiveState(selectedLibrarySongIds, archived);
@@ -7293,9 +7458,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         return;
       }
 
-      const confirmedPermanentDelete = window.confirm(language === 'zh'
-        ? `要永久刪除選取的 ${targets.length} 首封存歌曲嗎？\n\n有任何歌單或有效分享引用時，資料庫會拒絕整批刪除。成功後會清除本工作區的撤銷記錄。`
-        : `Permanently delete ${targets.length} selected archived song${targets.length === 1 ? '' : 's'}?\n\nThe database will reject the whole operation if a setlist or active share still references any song. Successful deletion clears this workspace’s undo history.`);
+      const confirmedPermanentDelete = await appDialog.confirm({
+        title: language === 'zh' ? '永久刪除封存歌曲' : 'Permanently delete archived songs',
+        message: language === 'zh'
+          ? `要永久刪除選取的 ${targets.length} 首封存歌曲嗎？\n\n有任何歌單或有效分享引用時，資料庫會拒絕整批刪除。成功後會清除本工作區的撤銷記錄。`
+          : `Permanently delete ${targets.length} selected archived song${targets.length === 1 ? '' : 's'}?\n\nThe database will reject the whole operation if a setlist or active share still references any song. Successful deletion clears this workspace’s undo history.`,
+        confirmLabel: language === 'zh' ? '永久刪除' : 'Delete permanently',
+        cancelLabel: copy.cancel,
+        tone: 'danger',
+      });
       if (!confirmedPermanentDelete) return;
       try {
         await permanentlyDeleteTeamSongs(targets.map((item) => item.id));
@@ -7305,11 +7476,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       return;
     }
 
-    const confirmed = window.confirm(
-      language === 'zh'
+    const confirmed = await appDialog.confirm({
+      title: language === 'zh' ? '永久刪除封存歌曲' : 'Permanently delete archived songs',
+      message: language === 'zh'
         ? `要永久刪除選取的 ${selectedLibrarySongIds.length} 首封存歌曲嗎？這會移除歌單引用，無法撤銷，並會清除本工作區的撤銷記錄。`
-        : `Permanently delete ${selectedLibrarySongIds.length} archived songs and their setlist references? This cannot be undone and clears this workspace’s undo history.`
-    );
+        : `Permanently delete ${selectedLibrarySongIds.length} archived songs and their setlist references? This cannot be undone and clears this workspace’s undo history.`,
+      confirmLabel: language === 'zh' ? '永久刪除' : 'Delete permanently',
+      cancelLabel: copy.cancel,
+      tone: 'danger',
+    });
     if (!confirmed) {
       return;
     }
@@ -8654,17 +8829,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     window.requestAnimationFrame(refreshPreviewEditAnchorRect);
   }, [activeEditorSong, activePreviewIdentity, findPreviewAnchorRect, hasFinePointer, refreshPreviewEditAnchorRect]);
 
-  const finishPreviewSectionAction = React.useCallback((action: 'insert-before' | 'duplicate' | 'merge-previous' | 'delete') => {
+  const finishPreviewSectionAction = React.useCallback(async (action: 'insert-before' | 'duplicate' | 'merge-previous' | 'delete') => {
     const target = previewSectionActionTarget;
     const editorSong = activeEditorSong;
     if (!canOpenEditor || !target || !editorSong || target.previewIdentity !== activePreviewIdentity) return;
     if (action === 'delete' && editorSong.sections.length <= 1) return;
     if (action === 'delete') {
-      const confirmed = window.confirm(
-        language === 'zh'
+      const confirmed = await appDialog.confirm({
+        title: language === 'zh' ? '刪除段落' : 'Delete section',
+        message: language === 'zh'
           ? `要刪除「${target.title.trim() || '未命名段落'}」嗎？`
-          : `Delete "${target.title.trim() || 'Untitled section'}"?`
-      );
+          : `Delete "${target.title.trim() || 'Untitled section'}"?`,
+        confirmLabel: language === 'zh' ? '刪除段落' : 'Delete section',
+        cancelLabel: copy.cancel,
+        tone: 'danger',
+      });
       if (!confirmed) return;
     }
 
@@ -8717,7 +8896,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
           ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }));
     }
-  }, [activeEditorSong, activePreviewIdentity, canOpenEditor, handleSetlistSongContentChange, handleSongChange, isSetlistMode, language, previewSectionActionTarget, refreshPreviewEditAnchorRect]);
+  }, [activeEditorSong, activePreviewIdentity, appDialog, canOpenEditor, copy.cancel, handleSetlistSongContentChange, handleSongChange, isSetlistMode, language, previewSectionActionTarget, refreshPreviewEditAnchorRect]);
 
   React.useEffect(() => {
     clearPendingPreviewSectionAction();
@@ -10418,7 +10597,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
               // frame: iOS WebKit mis-scales `outline` on transform:scale()'d
               // elements, which made this frame the wrong size in iPad landscape.
               // box-shadow scales correctly under the preview's transform.
-              isInteractive ? 'ring-2 ring-indigo-300 shadow-[0_0_0_8px_rgba(199,210,254,0.22)]' : 'ring-2 ring-transparent'
+              isInteractive ? 'ring-2 ring-indigo-300 shadow-[0_0_0_8px_rgba(46,140,94,0.16)]' : 'ring-2 ring-transparent'
             }`}
           >
             <RecoveryBoundary label="譜面預覽"><SetlistPreviewSong
@@ -11418,7 +11597,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     <MembersPanel key={selectedSetlist.id} language={language} kind="setlist" id={selectedSetlist.id} name={selectedSetlist.name || copy.untitledSetlist}
       meta={selectedSetlist.songs.length + (language === 'zh' ? ' 首歌曲' : ' songs')}
       actions={[
-        { label: language === 'zh' ? '開啟歌單' : 'Open setlist', icon: <ExternalLink size={16}/>, run: backFromSetlistMembers },
         ...(activeSetlistShareStatus?.activeToken ? [{ label: copy.setlistSharingCancel, icon: <LogOut size={16}/>, danger: true,
           disabled: isRevokingSetlistShare, run: () => setPendingRevokeShareSetlistId(selectedSetlist.id) }] : [])
       ]}
@@ -11436,7 +11614,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       <details className="group rounded-2xl border border-indigo-100 bg-indigo-50/50 px-3 py-2.5">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
           <div className="min-w-0">
-            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-500">
+            <div className="text-[11px] font-semibold text-indigo-600">
               {language === 'zh' ? '個人顯示' : 'Personal View'}
             </div>
             <div className="mt-1 truncate text-xs font-semibold text-indigo-700">
@@ -11479,10 +11657,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     ) : (
     <section className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3">
       <div className="flex items-center justify-between gap-2">
-        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-500">
+        <div className="text-[11px] font-semibold text-indigo-600">
           {language === 'zh' ? '個人顯示' : 'Personal View'}
         </div>
-        <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-indigo-600 ring-1 ring-indigo-100">
+        <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-indigo-600 ring-1 ring-indigo-100">
           {language === 'zh' ? '只影響你' : 'Local'}
         </span>
       </div>
@@ -11521,28 +11699,24 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         ref={workspaceSwitcherTriggerRef}
         type="button"
         onClick={() => setIsWorkspacePanelOpen((current) => !current)}
-        className="flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-left transition-colors hover:border-indigo-200 hover:bg-indigo-50"
+        className="ui-press flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-left transition-colors hover:border-indigo-200 hover:bg-indigo-50"
         aria-expanded={isWorkspacePanelOpen}
         aria-label={language === 'zh' ? '顯示工作區選項' : 'Show workspace options'}
         title={`${language === 'zh' ? '工作區' : 'Workspace'} · ${activeWorkspaceLabel}`}
       >
         <Users size={14} className="shrink-0 text-indigo-600" />
         <span className="min-w-0 flex-1 truncate text-xs font-bold text-gray-800">{isWorkspacePanelOpen ? (language === 'zh' ? '切換工作區' : 'Switch workspace') : activeWorkspaceLabel}</span>
-        {isWorkspacePanelOpen ? (
-          <ChevronUp size={14} className="shrink-0 text-gray-400" />
-        ) : (
-          <ChevronDown size={14} className="shrink-0 text-gray-400" />
-        )}
+        <ChevronDown size={14} className={`shrink-0 text-gray-400 ui-motion-chevron ${isWorkspacePanelOpen ? 'rotate-180' : ''}`} />
       </button>
 
       <AnimatedDisclosure open={isWorkspacePanelOpen} className="mt-2">
           {pendingTeamInvites.length > 0 ? (
             <div className="mb-2 rounded-xl border border-indigo-200 bg-indigo-50 p-2.5">
               <div className="flex items-center justify-between gap-2">
-                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-indigo-700">
+                <div className="text-[11px] font-semibold text-indigo-700">
                   {language === 'zh' ? '等待你確認' : 'Awaiting your response'}
                 </div>
-                <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-indigo-700">
+                <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold tabular-nums text-indigo-700">
                   {pendingTeamInvites.length}
                 </span>
               </div>
@@ -11599,7 +11773,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
 
           {shouldShowCreateTeamForm ? (
             <form onSubmit={handleCreateTeam} className="mt-2 rounded-lg border border-indigo-100 bg-indigo-50/70 p-2">
-              <label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-indigo-500">
+              <label className="block text-[11px] font-semibold text-indigo-700">
                 {language === 'zh' ? '團隊名稱' : 'Team name'}
               </label>
               <input
@@ -11657,7 +11831,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       {!isPhoneViewport && <div className="mt-1 text-xs text-gray-400">
         {isAutoSaveEnabled ? copy.autoSavedHint : copy.manualSaveHint}
       </div>}
-      <div className={`${isPhoneViewport ? 'shrink-0 text-[10px]' : 'mt-2 text-[11px] tracking-[0.18em]'} font-semibold text-gray-400`}>
+      <div className={`${isPhoneViewport ? 'shrink-0 text-[10px]' : 'mt-2 text-[11px]'} font-semibold tabular-nums text-gray-400`}>
         v{APP_VERSION}
       </div>
     </div>
@@ -11677,7 +11851,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       onOpenProject={handleSelectProject}
       onOpenJoinedProject={id => { handleSetlistProjectFilterChange({ kind: 'shared-project', projectId: id }); setSetlistPanelView('list'); }}
       onOpenSetlist={handleSelectSetlist}
-      onRename={project => { const name = window.prompt(copy.renameProjectPrompt, project.name); if (name !== null) handleRenameProject(project.id, name); }}
+      onRename={project => { void (async () => { const name = await appDialog.prompt({ title: copy.renameProjectPrompt, defaultValue: project.name, confirmLabel: language === 'zh' ? '儲存名稱' : 'Save', cancelLabel: copy.cancel }); if (name !== null) handleRenameProject(project.id, name); })(); }}
       onArchive={project => handleSetProjectArchived(project.id, !project.archived)}
       onDelete={project => { void handleDeleteProject(project.id); }}
       onShare={project => { void handleCreateProjectShareLink(project.id); }}
@@ -11698,7 +11872,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     ...(canShareProject(project) ? [{ label: language === 'zh' ? '分享／邀請' : 'Share / invite', icon: <Share2 size={16}/>, run: () => { void handleCreateProjectShareLink(project.id); }, disabled: creatingProjectShareLinkId !== null }] : []),
     { label: language === 'zh' ? '專案管理' : 'Project management', icon: <Users size={16}/>, run: () => handleOpenProjectManagement(project.id) },
     ...(canManageProject(project) ? [
-      { label: language === 'zh' ? '重新命名' : 'Rename', icon: <Edit3 size={16}/>, run: () => { const name = window.prompt(copy.renameProjectPrompt, project.name); if (name !== null) handleRenameProject(project.id, name); } },
+      { label: language === 'zh' ? '重新命名' : 'Rename', icon: <Edit3 size={16}/>, run: () => { void (async () => { const name = await appDialog.prompt({ title: copy.renameProjectPrompt, defaultValue: project.name, confirmLabel: language === 'zh' ? '儲存名稱' : 'Save', cancelLabel: copy.cancel }); if (name !== null) handleRenameProject(project.id, name); })(); } },
       { label: language === 'zh' ? '歸檔專案' : 'Archive project', icon: <Archive size={16}/>, run: () => handleSetProjectArchived(project.id, true) },
       { label: language === 'zh' ? '刪除專案' : 'Delete project', icon: <Trash2 size={16}/>, danger: true, run: () => { void handleDeleteProject(project.id); } }
     ] : [])
@@ -11884,7 +12058,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
 
         {joinedSetlistsInScope.length > 0 && (
           <div className="mt-4">
-            <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
+            <div className="mb-1.5 flex items-center justify-between text-xs font-semibold tabular-nums text-gray-500">
               <span>{copy.sharedWithMe}</span>
               <span>{normalizedSetlistSearchQuery ? `${filteredJoinedSetlists.length}/${joinedSetlistsInScope.length}` : joinedSetlistsInScope.length}</span>
             </div>
@@ -11970,7 +12144,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
           {isPhoneViewport && <button type="button" className="drummer-entry drummer-entry-compact" data-drummer-trigger onClick={openDrummerMode} disabled={!setlistPreviewSongs.length}>
             <Drum size={16}/><span>{language === 'zh' ? '鼓手模式' : 'Drummer mode'}</span>
           </button>}
-          {isSetlistSongSortMode ? <button type="button" className="pm-text-button" onClick={()=>{finishSetlistSongPointerDrag();setIsSetlistSongSortMode(false);}}><Check size={15}/>{language==='zh'?'完成排序':'Done'}</button> : (isJoinedSetlist || canEditSelectedSetlist || canShareSelectedSetlist || canReorderSelectedSetlist) && <ManagementActions label={language==='zh'?'歌單操作':'Setlist actions'} actions={[
+          {isSetlistSongSortMode ? <button type="button" className="pm-text-button" onClick={()=>{finishSetlistSongPointerDrag();setIsSetlistSongSortMode(false);}}><Check size={15}/>{language==='zh'?'完成排序':'Done'}</button> : !setlistSongSelectionActive && (isJoinedSetlist || canEditSelectedSetlist || canShareSelectedSetlist || canReorderSelectedSetlist) && <ManagementActions label={language==='zh'?'歌單操作':'Setlist actions'} actions={[
             ...(canReorderSelectedSetlist ? [{label:language==='zh'?'調整歌曲順序':'Reorder songs',icon:<ListMusic size={16}/>,run:()=>setIsSetlistSongSortMode(true)}] : []),
             ...(canShareSelectedSetlist ? [{label:copy.shareCurrentSetlist,icon:<Share2 size={16}/>,run:()=>{void handleCreateShareLink('setlist');},disabled:isExportingPdf||isRevokingSetlistShare}] : []),
             ...(!isJoinedSetlist && canEditSelectedSetlist ? [
@@ -11983,17 +12157,43 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
             ...(isJoinedSetlist ? [{label:selectedSetlistJoinedProject?copy.leaveProject:copy.leaveSetlist,icon:<LogOut size={16}/>,run:()=>selectedSetlistJoinedProject?requestLeaveSharedProject(selectedSetlistJoinedProject.id):requestLeaveSharedSetlist(selectedSetlist.id),danger:true,disabled:selectedSetlistJoinedProject?leavingSharedProjectId===selectedSetlistJoinedProject.id:leavingSharedSetlistId===selectedSetlist.id}] : [])
           ]}/>}
         </div>
-        <div className="setlist-detail-toolbar">
+        {setlistSongSelectionActive ? (
+          <div className="setlist-detail-toolbar setlist-song-batch-toolbar" role="group"
+            aria-label={language === 'zh' ? '移出選取歌曲' : 'Remove selected songs'}>
+            <span className="setlist-song-selection-count" role="status">
+              {language === 'zh' ? `已選 ${selectedSetlistSongEntries.length} 首` : `${selectedSetlistSongEntries.length} selected`}
+            </span>
+            <div className="setlist-detail-actions">
+              <button type="button" className="pm-text-button ui-press" onClick={() => {
+                setlistSongSelectionFocus.current = 'trigger';
+                setSetlistSongSelection(null);
+              }}>{copy.cancel}</button>
+              <button type="button" className="pm-text-button setlist-song-batch-remove ui-press"
+                disabled={!selectedSetlistSongEntries.length || historyForwardBusy || globalHistory.busy}
+                onClick={() => void handleRemoveSetlistSongs(selectedSetlistSongEntries.map(({ item }) => item.id))}>
+                <Trash2 size={15} aria-hidden="true" />{language === 'zh' ? '移出選取' : 'Remove selected'}
+              </button>
+            </div>
+          </div>
+        ) : <div className="setlist-detail-toolbar">
           <div className="setlist-project-context">
             <span>{setlistSongsWithSource.length}{language === 'zh' ? ' 首歌曲' : ' songs'}</span>
             {canViewSetlistMembers && !isSetlistSongSortMode && <MembersButton language={language} kind="setlist" status={activeSetlistShareStatus}
               loading={isLoadingSetlistShareStatus} error={setlistShareStatusError} onClick={() => setSetlistPanelView('setlistMembers')}/>}
           </div>
-          <div className="flex items-center gap-2">
-            {canEditSelectedSetlist && !isSetlistSongSortMode && <button type="button" className="pm-new-button" aria-label={copy.addToSetlist}
+          <div className="setlist-detail-actions">
+            {setlistSongSelectionKey && !isSetlistSongSortMode && setlistSongsWithSource.length > 0 && (
+              <button ref={setlistSongSelectionTrigger} type="button" className="pm-text-button ui-press"
+                onClick={() => {
+                  finishSetlistSongPointerDrag();
+                  setlistSongSelectionFocus.current = 'first';
+                  setSetlistSongSelection({ key: setlistSongSelectionKey, ids: new Set() });
+                }}>{language === 'zh' ? '多選移除' : 'Select to remove'}</button>
+            )}
+            {canEditSelectedSetlist && !isSetlistSongSortMode && <button ref={setlistAddSongsTrigger} type="button" className="pm-new-button" aria-label={copy.addToSetlist}
               onClick={() => { setSetlistAddSongSelection([]); setSetlistPanelView('addSongs'); }}><Plus size={16}/>{language === 'zh' ? '加入歌曲' : 'Add songs'}</button>}
           </div>
-        </div>
+        </div>}
         {!isPhoneViewport && <button type="button" className="drummer-entry" data-drummer-trigger onClick={openDrummerMode} disabled={!setlistPreviewSongs.length}>
           <Drum size={18}/><span>{language === 'zh' ? '鼓手模式' : 'Drummer mode'}</span><ChevronRight size={16}/>
         </button>}
@@ -12011,10 +12211,32 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         ) : (
           <div className="setlist-song-list">
             {setlistSongsWithSource.map(({ item, sourceSong }, index) => {
+              const displaySong = item.songData ?? sourceSong;
+              const songTitle = displaySong.title || sourceSong.title || copy.untitledSong;
+              if (setlistSongSelectionActive) {
+                return (
+                  <label key={item.id} className="setlist-song-batch-row" data-setlist-song-id={item.id}>
+                    <input ref={index === 0 ? firstSetlistSongCheckbox : undefined} type="checkbox" name="setlist-song-entry"
+                      checked={setlistSongSelection?.ids.has(item.id) ?? false}
+                      aria-label={language === 'zh' ? `選取第 ${index + 1} 首：${songTitle}` : `Select song ${index + 1}: ${songTitle}`}
+                      onChange={event => {
+                        const checked = event.currentTarget.checked;
+                        setSetlistSongSelection(current => {
+                          if (current?.key !== setlistSongSelectionKey) return current;
+                          const ids = new Set(current.ids);
+                          if (checked) ids.add(item.id);
+                          else ids.delete(item.id);
+                          return { ...current, ids };
+                        });
+                      }}/>
+                    <span className="setlist-song-batch-index" aria-hidden="true">{index + 1}</span>
+                    <span className="setlist-song-title"><SongTitle title={songTitle}/></span>
+                  </label>
+                );
+              }
               const isActive = item.id === selectedSetlistSong?.id;
               const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
               const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, setlistCapoResolutionOptions);
-              const displaySong = item.songData ?? sourceSong;
               const sourceStatus = isActive && setlistSourceStatuses.has(item.id)
                 ? selectedSetlistSourceStatus : setlistSourceStatuses.get(item.id) ?? 'aligned';
               const sourceStatusLabel = getSetlistSourceStatusLabel(sourceStatus, language);
@@ -12055,7 +12277,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                         <GripVertical size={12} className="setlist-song-number-grip" aria-hidden="true" />
                       </button>
                     ) : <span className="setlist-song-static-number"><span className="setlist-song-number">{index + 1}</span></span>}
-                    {canEditSelectedSetlist && !isSetlistSongSortMode && <SetlistSongActions label={language === 'zh' ? `歌曲操作：${displaySong.title}` : `Song actions: ${displaySong.title}`} removeLabel={copy.removeFromSetlist} onRemove={() => handleRemoveSetlistSong(item.id)}
+                    {canEditSelectedSetlist && !isSetlistSongSortMode && <SetlistSongActions label={language === 'zh' ? `歌曲操作：${displaySong.title}` : `Song actions: ${displaySong.title}`} removeLabel={copy.removeFromSetlist} onRemove={() => handleRemoveSetlistSongs([item.id])}
+                      onMoveUp={canReorderSelectedSetlist && index > 0 ? () => { const prev = setlistSongsWithSource[index - 1]; if (prev) moveSetlistSong(item.id, prev.item.id); } : undefined}
+                      onMoveDown={canReorderSelectedSetlist && index < setlistSongsWithSource.length - 1 ? () => { const next = setlistSongsWithSource[index + 1]; if (next) moveSetlistSong(item.id, next.item.id); } : undefined}
                       language={language}
                       barRowCount={(activePreviewEditSession?.previewIdentity === item.id ? activePreviewEditSession.draftSong.barRowCount : displaySong.barRowCount) ?? 2}
                       onBarRowCountChange={canEditSelectedSetlistContent ? count => handleSetlistSongBarRowCountChange(item.id, count) : undefined}
@@ -12063,7 +12287,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   </div>
                     <button type="button" onClick={() => handleSelectSetlistSong(item.id)} aria-current={isActive ? 'true' : undefined} className="setlist-song-select">
                       <span className="setlist-song-title-line">
-                        <span className="setlist-song-title"><SongTitle title={displaySong.title || sourceSong.title || copy.untitledSong}/></span>
+                        <span className="setlist-song-title"><SongTitle title={songTitle}/></span>
                         {isActive && <Check size={16} aria-label={language === 'zh' ? '目前顯示' : 'Current song'} className="setlist-song-current" />}
                         {sourceSong.archivedAt || item.sourceArchivedAt ? <span className="setlist-song-archived">{language === 'zh' ? '已封存' : 'Archived'}</span> : null}
                       </span>
@@ -12191,7 +12415,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       <div ref={setlistAddSongsResultsRef} className="setlist-detail-scroll" data-setlist-detail-scroll>
         <div className="divide-y divide-gray-200">
           {filteredSongsForSetlist.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-500">
+            <div className="m-3 rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-center text-sm text-gray-500">
               {searchEmptyMessage(setlistSongSearchQuery)}
             </div>
           ) : (
@@ -12205,8 +12429,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   key={`setlist-add-${librarySong.id}`}
                   className={`flex items-center gap-2 py-2 transition-colors ${
                     isSelected
-                      ? 'border-indigo-300 bg-indigo-50'
-                      : 'border-gray-200 bg-white'
+                      ? 'bg-indigo-50'
+                      : 'bg-white'
                   }`}
                 >
                   <button
@@ -12255,7 +12479,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                       >
                         <Minus size={14} strokeWidth={3} />
                       </button>
-                      <span className="min-w-[1.25rem] text-center text-sm font-bold text-indigo-700">{selectedCount}</span>
+                      <span className="min-w-[1.25rem] text-center text-sm font-bold tabular-nums text-indigo-700">{selectedCount}</span>
                       <button
                         type="button"
                         onClick={() => incrementSetlistAddSongSelection(librarySong.id)}
@@ -12279,7 +12503,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
           type="button"
           disabled={setlistAddSongSelection.length === 0}
           onClick={() => handleAddSongsToSetlist(setlistAddSongSelection)}
-          className="ui-press flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none"
+          className="ui-press flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none"
         >
           <Plus size={16} />
           <span>
@@ -12410,10 +12634,19 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     >
       <LegacyDraftRecovery userId={authenticatedUser?.id} libraryId={activeLibraryId} account={authenticatedUser?.email}
         enabled={!isTeamWorkspace && !isLoadingCloudWorkspace && !workspaceIsDirty && workspaceOwnerId === authenticatedUser?.id} />
-      <TeamDraftRecovery draft={teamDraft.pending} error={teamDraft.error} onDiscard={teamDraft.dismiss} onRestore={() => {
+      <TeamDraftRecovery draft={teamDraft.pending} error={teamDraft.error} onDiscard={teamDraft.dismiss} onRestore={() => void (async () => {
         if (!teamDraft.pending) return;
         const restored = restoreTeamDraft(teamDraft.pending, { songs, setlists, projects });
-        if (restored.conflicts > 0 && !window.confirm(`有 ${restored.conflicts} 個項目同時在雲端被修改。恢復會以草稿內容取代這些項目，確定繼續？`)) return;
+        if (restored.conflicts > 0) {
+          const confirmed = await appDialog.confirm({
+            title: '確認覆蓋雲端修改',
+            message: `有 ${restored.conflicts} 個項目同時在雲端被修改。恢復會以草稿內容取代這些項目，確定繼續？`,
+            confirmLabel: '以草稿取代',
+            cancelLabel: copy.cancel,
+            tone: 'danger',
+          });
+          if (!confirmed) return;
+        }
         const now = Date.now();
         const renew = <T extends { id: string; updatedAt: number }>(items: T[], saved: T[]) => items.map((item) =>
           saved.some((other) => other.id === item.id && JSON.stringify(other) === JSON.stringify(item)) ? item : { ...item, updatedAt: now });
@@ -12421,27 +12654,37 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         setSetlists(renew(restored.workspace.setlists, savedSetlists));
         setProjects(renew(restored.workspace.projects, savedProjects));
         teamDraft.restored();
-      }} />
+      })()} />
 
-      {isSwitchingLibrary && (
-        <div
-          className="absolute inset-0 z-[300] flex items-center justify-center bg-white/70 backdrop-blur-[2px] dark:bg-stone-950/65"
-          role="status"
-          aria-live="polite"
-        >
-          <div className="flex items-center gap-2 rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-bold text-stone-700 shadow-xl dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
-            <LoaderCircle size={18} className="animate-spin text-indigo-600" />
-            <span>{language === 'zh' ? '正在切換曲庫…' : 'Switching library…'}</span>
-          </div>
-        </div>
-      )}
+      <AnimatePresence initial={false} custom={uiMotion}>
+        {isSwitchingLibrary && (
+          <PresenceSurface
+            key="library-switching"
+            {...backdropMotion}
+            className="absolute inset-0 z-[300] flex items-center justify-center bg-white/80 dark:bg-stone-950/70"
+            role="status"
+            aria-live="polite"
+          >
+            <PresenceSurface
+              {...modalMotion}
+              className="flex items-center gap-2 rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-bold text-stone-700 shadow-xl dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
+            >
+              <LoaderCircle size={18} className="animate-spin text-indigo-600" />
+              <span>{language === 'zh' ? '正在切換曲庫…' : 'Switching library…'}</span>
+            </PresenceSurface>
+          </PresenceSurface>
+        )}
+      </AnimatePresence>
 
-      {isKeyboardShortcutsOpen && (
-        <KeyboardShortcutsDialog
-          language={language}
-          onClose={() => setIsKeyboardShortcutsOpen(false)}
-        />
-      )}
+      <AnimatePresence initial={false} custom={uiMotion}>
+        {isKeyboardShortcutsOpen && (
+          <KeyboardShortcutsDialog
+            key="keyboard-shortcuts"
+            language={language}
+            onClose={() => setIsKeyboardShortcutsOpen(false)}
+          />
+        )}
+      </AnimatePresence>
 
       {usesOverlaySidebar && (
         <motion.button
@@ -12527,14 +12770,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                 aria-expanded={isSidebarExpanded}
                 onPointerDown={event => pressSidebarControl(event, toggleSidebar)}
                 onClick={event => clickSidebarControl(event, toggleSidebar)}
-                className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
+                className={`ui-press w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
                   isSidebarExpanded
-                    ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-200'
+                    ? 'bg-emerald-600 text-white shadow-sm'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
                 title={isSidebarExpanded ? copy.collapseSongList : copy.pinSongList}
               >
-                {isSidebarExpanded ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
+                <ChevronRight size={18} className={`ui-motion-chevron ${isSidebarExpanded ? 'rotate-180' : ''}`} />
               </button>
 
               <div className="flex w-full flex-col items-center gap-2 px-2">
@@ -12544,8 +12787,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   aria-expanded={isSidebarExpanded && !isSetlistMode}
                   onPointerDown={event => pressSidebarControl(event, () => openSidebarWorkspace('songs'))}
                   onClick={event => clickSidebarControl(event, () => openSidebarWorkspace('songs'))}
-                  className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
-                    !isSetlistMode ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  className={`ui-press w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
+                    !isSetlistMode ? 'bg-indigo-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
                   title={copy.songs}
                 >
@@ -12557,8 +12800,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   aria-expanded={isSidebarExpanded && isSetlistMode}
                   onPointerDown={event => pressSidebarControl(event, () => openSidebarWorkspace('setlists'))}
                   onClick={event => clickSidebarControl(event, () => openSidebarWorkspace('setlists'))}
-                  className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
-                    isSetlistMode ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  className={`ui-press w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
+                    isSetlistMode ? 'bg-indigo-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
                   title={copy.setlists}
                 >
@@ -12568,7 +12811,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   <button
                     type="button"
                     onClick={handleCreateSong}
-                    className="w-11 h-11 rounded-2xl flex items-center justify-center bg-indigo-50 text-indigo-600 transition-colors hover:bg-indigo-100"
+                    className="ui-press w-11 h-11 rounded-2xl flex items-center justify-center bg-indigo-50 text-indigo-600 transition-colors hover:bg-indigo-100"
                     title={copy.newSong}
                   >
                     <Plus size={18} />
@@ -12582,9 +12825,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
               </div>
 
               <div className="mt-auto flex w-full flex-col items-center gap-3 px-2">
-                <div className="flex flex-col items-center gap-1 text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em]">
+                <div className="flex flex-col items-center gap-1 text-[11px] font-semibold text-gray-500">
                   <span>{isSetlistMode ? copy.setlists : copy.songs}</span>
-                  <div className="min-w-10 rounded-full bg-gray-100 px-2 py-1 text-center text-xs text-gray-700">
+                  <div className="min-w-10 rounded-full bg-gray-100 px-2 py-1 text-center text-xs font-bold tabular-nums text-gray-700">
                     {isSetlistMode ? setlists.length : userLibrarySongs.length}
                   </div>
                 </div>
@@ -12592,9 +12835,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   <button
                     type="button"
                     onClick={() => handleAppViewChange('about')}
-                    className={`flex h-10 w-10 items-center justify-center rounded-2xl transition-colors ${
+                    className={`ui-press flex h-11 w-11 items-center justify-center rounded-2xl transition-colors ${
                       activeAppView === 'about'
-                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
+                        ? 'bg-indigo-600 text-white shadow-sm'
                         : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                     }`}
                     title={activeAppView === 'about' ? copy.backToPreview : copy.about}
@@ -12605,9 +12848,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   <button
                     type="button"
                     onClick={() => handleAppViewChange('help')}
-                    className={`flex h-10 w-10 items-center justify-center rounded-2xl transition-colors ${
+                    className={`ui-press flex h-11 w-11 items-center justify-center rounded-2xl transition-colors ${
                       activeAppView === 'help'
-                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
+                        ? 'bg-indigo-600 text-white shadow-sm'
                         : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                     }`}
                     title={activeAppView === 'help' ? copy.backToPreview : copy.help}
@@ -12619,9 +12862,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                     <button
                       type="button"
                       onClick={() => setIsKeyboardShortcutsOpen(true)}
-                      className={`flex h-10 w-10 items-center justify-center rounded-2xl transition-colors ${
+                      className={`ui-press flex h-11 w-11 items-center justify-center rounded-2xl transition-colors ${
                         isKeyboardShortcutsOpen
-                          ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
+                          ? 'bg-indigo-600 text-white shadow-sm'
                           : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                       }`}
                       title={language === 'zh' ? '快捷鍵（?）' : 'Keyboard shortcuts (?)'}
@@ -12642,7 +12885,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                         else if (syncStatus === 'failed') toast.error(syncStatusFeedback);
                         else toast.success(syncStatusFeedback);
                       }}
-                      className={`flex h-10 w-10 items-center justify-center rounded-2xl ring-1 ring-inset transition-colors ${syncStatusTone}`}
+                      className={`ui-press flex h-11 w-11 items-center justify-center rounded-2xl ring-1 ring-inset transition-colors ${syncStatusTone}`}
                       title={`${language === 'zh' ? '同步狀態' : 'Sync status'}: ${syncStatusFeedback}`}
                       aria-label={`${language === 'zh' ? '同步狀態' : 'Sync status'}: ${syncStatusFeedback}`}
                     >
@@ -12658,7 +12901,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                     <button
                       type="button"
                       onClick={() => toast.info(copy.localModeWarning)}
-                      className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gray-100 text-gray-500 ring-1 ring-inset ring-gray-200/70 transition-colors hover:bg-gray-200"
+                      className="ui-press flex h-11 w-11 items-center justify-center rounded-2xl bg-gray-100 text-gray-500 ring-1 ring-inset ring-gray-200/70 transition-colors hover:bg-gray-200"
                       title={`${language === 'zh' ? '同步狀態' : 'Sync status'}: ${language === 'zh' ? '本地模式（未連線雲端）' : 'Local mode (not synced)'}`}
                       aria-label={`${language === 'zh' ? '同步狀態' : 'Sync status'}: ${language === 'zh' ? '本地模式（未連線雲端）' : 'Local mode (not synced)'}`}
                     >
@@ -12953,7 +13196,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         ) : null}
 
         {/* Top Control Bar */}
-        <header data-topbar data-lyrics-reading={isLyricsWorkspace && isLyricsReading && isLyricsContinuous || undefined} className={`z-40 flex-shrink-0 border-b border-gray-200 bg-white/80 backdrop-blur-md dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]/85 ${
+        <header data-topbar data-lyrics-reading={isLyricsWorkspace && isLyricsReading && isLyricsContinuous || undefined} className={`z-40 flex-shrink-0 border-b border-gray-200 bg-white/95 dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]/95 ${
           isPhoneViewport
             ? 'px-3 py-2.5'
             : usesDenseDesktopHeader
@@ -12984,7 +13227,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   <div className="flex min-w-0 items-center gap-1.5"><span className="truncate text-sm font-bold tracking-tight text-[color:var(--color-text)]">{APP_NAME}</span>{connectionIndicator}</div>
                   <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
                     {isSheetView ? (
-                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] ${
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                         isSetlistMode
                           ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
                           : 'bg-stone-100 text-stone-700 ring-1 ring-stone-200'
@@ -13001,7 +13244,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                     type="button"
                     onClick={() => void handleGoogleSignIn()}
                     disabled={!isAuthConfigured}
-                    className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-indigo-700 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="ui-press inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-indigo-700 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-50"
                     aria-label={copy.continueWithGoogle}
                   >
                     <LogIn size={16} />
@@ -13033,7 +13276,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
               </div>
 
               {isSheetView && !(isLyricsWorkspace && isLyricsReading && isLyricsContinuous) ? (
-                <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+                <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
                   <button type="button" onClick={handleToggleHandwriting} disabled={!authenticatedUser}
                     title={handwritingLabel} aria-label={handwritingLabel} aria-pressed={isHandwriting}
                     className={`${getMobileTopbarActionClassName(isHandwriting ? 'primary' : 'default')} shrink-0 disabled:opacity-40`}>
@@ -13143,7 +13386,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                 <div className="h-4 w-px shrink-0 bg-gray-200" />
 
                 <div className="flex min-w-0 items-center gap-2">
-                  <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold tracking-[0.08em] ${
+                  <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${
                     isSetlistMode
                       ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
                       : 'bg-stone-100 text-stone-700 ring-1 ring-stone-200'
@@ -13159,7 +13402,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
               </div>
 
               <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
-                <div ref={toolbarActionLabelsRef} className="flex min-w-0 flex-1 overflow-x-auto pb-1 no-scrollbar">
+                <div ref={toolbarActionLabelsRef} className="flex min-w-0 flex-1 overflow-x-auto no-scrollbar">
                   <div data-toolbar-label-content className="ml-auto flex w-max shrink-0 items-center gap-2">
                   <button
                     type="button"
@@ -13261,7 +13504,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                         aria-label={copy.nashvilleModeLabel}
                         className={denseToolbarToggleClassName(song.showNashvilleNumbers)}
                       >
-                        <span className={`inline-flex min-w-[24px] items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] font-black leading-none ${
+                        <span className={`inline-flex min-w-[24px] items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] font-bold tabular-nums leading-none ${
                           song.showNashvilleNumbers
                             ? 'border-indigo-200 bg-white/70 text-current'
                             : 'border-gray-200 bg-gray-50 text-gray-600'
@@ -13279,7 +13522,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                         aria-label={copy.fixedDoModeLabel}
                         className={denseToolbarToggleClassName(song.showAbsoluteJianpu)}
                       >
-                        <span className={`inline-flex min-w-[28px] items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] font-black leading-none ${
+                        <span className={`inline-flex min-w-[28px] items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] font-bold tabular-nums leading-none ${
                           song.showAbsoluteJianpu
                             ? 'border-indigo-200 bg-white/70 text-current'
                             : 'border-gray-200 bg-gray-50 text-gray-600'
@@ -13314,7 +13557,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                     <button
                       type="button"
                       onClick={() => setIsGoogleAccountMenuOpen((current) => !current)}
-                      className={`inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm transition-colors ${
+                      className={`ui-press inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm transition-colors ${
                         isGoogleAccountMenuOpen
                           ? 'border-indigo-300 ring-2 ring-indigo-100'
                           : 'border-gray-200 hover:border-indigo-200 hover:bg-gray-50'
@@ -13328,7 +13571,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                         <img
                           src={authenticatedUser.picture}
                           alt={authenticatedUser.name}
-                          className="h-7 w-7 rounded-full border border-gray-200 object-cover"
+                          className="h-7 w-7 rounded-full object-cover"
                         />
                       ) : (
                         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-700">
@@ -13337,7 +13580,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                       )}
                     </button>
 
-                    <AnimatedPopover open={isGoogleAccountMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
+                    <AnimatedPopover open={isGoogleAccountMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-56 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl">
                         <div className="rounded-xl bg-gray-50 px-3 py-2">
                           <div className="truncate text-sm font-semibold text-gray-800">{authenticatedUser.name}</div>
                           <div className="mt-0.5 truncate text-[11px] text-gray-500">{authenticatedUser.email}</div>
@@ -13345,7 +13588,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                         <button
                           type="button"
                           onClick={handleGoogleSignOut}
-                          className="mt-2 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
+                          className="ui-press flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
                         >
                           <LogOut size={14} />
                           <span>{copy.signOut}</span>
@@ -13358,7 +13601,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                       <button
                         type="button"
                         onClick={() => setIsGoogleAccountMenuOpen((current) => !current)}
-                        className={`inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm transition-colors ${
+                        className={`ui-press inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm transition-colors ${
                           isGoogleAccountMenuOpen
                             ? 'border-indigo-300 ring-2 ring-indigo-100'
                             : 'border-gray-200 hover:border-indigo-200 hover:bg-gray-50'
@@ -13372,7 +13615,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                           <img
                             src={googleUser.picture}
                             alt={googleUser.name}
-                            className="h-7 w-7 rounded-full border border-gray-200 object-cover"
+                            className="h-7 w-7 rounded-full object-cover"
                           />
                         ) : (
                           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-700">
@@ -13381,15 +13624,16 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                         )}
                       </button>
 
-                      <AnimatedPopover open={isGoogleAccountMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
+                      <AnimatedPopover open={isGoogleAccountMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-56 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl">
                           <div className="rounded-xl bg-gray-50 px-3 py-2">
                             <div className="truncate text-sm font-semibold text-gray-800">{googleUser.name}</div>
                             <div className="mt-0.5 truncate text-[11px] text-gray-500">{googleUser.email}</div>
                           </div>
+                          <div role="separator" className="my-1 border-t border-gray-100" />
                           <button
                             type="button"
                             onClick={handleGoogleSignOut}
-                            className="mt-2 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
+                            className="ui-press flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
                           >
                             <LogOut size={14} />
                             <span>{copy.signOut}</span>
@@ -13400,7 +13644,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                     <div className="flex shrink-0 items-center gap-2">
                       <div ref={googleSignInRef} className="flex min-h-9 min-w-0 items-center justify-end" />
                       {googleAuthError ? (
-                        <span className="text-[10px] font-medium text-amber-600" title={googleAuthError}>!</span>
+                        <button
+                          type="button"
+                          onClick={() => toast.error(googleAuthError)}
+                          className="ui-press inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-50 text-xs font-bold text-amber-700 ring-1 ring-amber-200"
+                          title={googleAuthError}
+                          aria-label={googleAuthError}
+                        >
+                          !
+                        </button>
                       ) : null}
                     </div>
                   ) : null
@@ -13414,7 +13666,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                 <div className={mainViewportWidth < 960 ? 'hidden' : 'min-w-0'}>
                   <div className="flex min-w-0 items-center gap-2"><span className="truncate font-display text-lg font-bold tracking-tight text-gray-900 dark:text-[color:var(--color-text)]">{APP_NAME}</span>{mainViewportWidth >= 960 ? connectionIndicator : null}</div>
                   <div className="mt-0.5 flex min-w-0 items-center gap-2">
-                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] ${
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                       isSetlistMode
                         ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
                         : 'bg-stone-100 text-stone-700 ring-1 ring-stone-200'
@@ -13429,7 +13681,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
               </div>
 
               <div className="flex min-w-0 items-center justify-end">
-                <div ref={toolbarActionLabelsRef} className="flex min-w-0 flex-1 overflow-x-auto pb-1 no-scrollbar">
+                <div ref={toolbarActionLabelsRef} className="flex min-w-0 flex-1 overflow-x-auto no-scrollbar">
                   <div data-toolbar-label-content className="ml-auto flex w-max shrink-0 items-center gap-2">
                   <button
                     type="button"
@@ -13569,7 +13821,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                     <button
                       type="button"
                       onClick={() => setIsGoogleAccountMenuOpen((current) => !current)}
-                      className={`inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm transition-colors ${
+                      className={`ui-press inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm transition-colors ${
                         isGoogleAccountMenuOpen
                           ? 'border-indigo-300 ring-2 ring-indigo-100'
                           : 'border-gray-200 hover:border-indigo-200 hover:bg-gray-50'
@@ -13583,7 +13835,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                         <img
                           src={authenticatedUser.picture}
                           alt={authenticatedUser.name}
-                          className="h-7 w-7 rounded-full border border-gray-200 object-cover"
+                          className="h-7 w-7 rounded-full object-cover"
                         />
                       ) : (
                         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-700">
@@ -13592,7 +13844,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                       )}
                     </button>
 
-                    <AnimatedPopover open={isGoogleAccountMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
+                    <AnimatedPopover open={isGoogleAccountMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-56 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl">
                         <div className="rounded-xl bg-gray-50 px-3 py-2">
                           <div className="truncate text-sm font-semibold text-gray-800">{authenticatedUser.name}</div>
                           <div className="mt-0.5 truncate text-[11px] text-gray-500">{authenticatedUser.email}</div>
@@ -13600,7 +13852,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                         <button
                           type="button"
                           onClick={handleGoogleSignOut}
-                          className="mt-2 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
+                          className="ui-press flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
                         >
                           <LogOut size={14} />
                           <span>{copy.signOut}</span>
@@ -13613,7 +13865,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                       <button
                         type="button"
                         onClick={() => setIsGoogleAccountMenuOpen((current) => !current)}
-                        className={`inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm transition-colors ${
+                        className={`ui-press inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm transition-colors ${
                           isGoogleAccountMenuOpen
                             ? 'border-indigo-300 ring-2 ring-indigo-100'
                             : 'border-gray-200 hover:border-indigo-200 hover:bg-gray-50'
@@ -13627,7 +13879,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                           <img
                             src={googleUser.picture}
                             alt={googleUser.name}
-                            className="h-7 w-7 rounded-full border border-gray-200 object-cover"
+                            className="h-7 w-7 rounded-full object-cover"
                           />
                         ) : (
                           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-700">
@@ -13636,15 +13888,16 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                         )}
                       </button>
 
-                      <AnimatedPopover open={isGoogleAccountMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
+                      <AnimatedPopover open={isGoogleAccountMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-56 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl">
                           <div className="rounded-xl bg-gray-50 px-3 py-2">
                             <div className="truncate text-sm font-semibold text-gray-800">{googleUser.name}</div>
                             <div className="mt-0.5 truncate text-[11px] text-gray-500">{googleUser.email}</div>
                           </div>
+                          <div role="separator" className="my-1 border-t border-gray-100" />
                           <button
                             type="button"
                             onClick={handleGoogleSignOut}
-                            className="mt-2 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
+                            className="ui-press flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
                           >
                             <LogOut size={14} />
                             <span>{copy.signOut}</span>
@@ -13655,7 +13908,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                     <div className="flex shrink-0 items-center gap-2">
                       <div ref={googleSignInRef} className="flex min-h-9 min-w-0 items-center justify-end" />
                       {googleAuthError ? (
-                        <span className="text-[10px] font-medium text-amber-600" title={googleAuthError}>!</span>
+                        <button
+                          type="button"
+                          onClick={() => toast.error(googleAuthError)}
+                          className="ui-press inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-50 text-xs font-bold text-amber-700 ring-1 ring-amber-200"
+                          title={googleAuthError}
+                          aria-label={googleAuthError}
+                        >
+                          !
+                        </button>
                       ) : null}
                     </div>
                   ) : null
@@ -13676,7 +13937,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   <div className="hidden h-4 w-px bg-gray-200 sm:block" />
                   <div className="flex min-w-0 items-center gap-2">
                     {activeAppView === 'sheet' && (
-                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold tracking-[0.08em] ${
+                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                         isSetlistMode
                           ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
                           : 'bg-stone-100 text-stone-700 ring-1 ring-stone-200'
@@ -14254,8 +14515,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                 onCancel={() => setPreviewEditSession(null)}
               />
             )}
+            <AnimatePresence initial={false} custom={uiMotion}>
             {previewSectionActionTarget && canOpenEditor && !isLyricsMode && activeEditorSong && (
               <PreviewSectionActionMenu
+                key={previewSectionActionTarget.sectionId}
                 language={language}
                 deviceLayout={previewEditorDeviceLayout}
                 title={previewSectionActionTarget.title}
@@ -14273,6 +14536,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                 }}
               />
             )}
+            </AnimatePresence>
             <AnimatePresence initial={false} custom={uiMotion}>
             {previewPasteMenu && canOpenEditor && previewPasteMenu.previewIdentity === activePreviewIdentity && <PreviewPasteMenu
               language={language} count={previewPasteMenu.content.items.length} left={previewPasteMenu.left} top={previewPasteMenu.top}
@@ -14309,7 +14573,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   role="menu"
                   aria-label={language === 'zh' ? '小節批量操作' : 'Batch bar actions'}
                   data-preview-edit-ui
-                  className="fixed z-[5300] w-[280px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-xl bg-[var(--color-surface)] p-2 shadow-[0_18px_48px_rgba(15,23,42,0.22)]"
+                  className="fixed z-[5300] w-[280px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2 shadow-[0_18px_48px_rgba(15,23,42,0.22)]"
                   style={{ transformOrigin: "0% 0%", left: menuLeft, top: menuTop, maxHeight: `calc(100dvh - ${menuTop + 8}px)` }}
                   onKeyDown={event => {
                     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setPreviewBarContextMenu(null); }
@@ -14350,6 +14614,19 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                       setPreviewBarContextMenu(null);
                       if (!activePreviewEditSession) setActiveBar(null);
                     }}
+                    onInsertAfter={() => {
+                      if (previewBarContextMenu.previewIdentity !== activePreviewIdentity) return;
+                      const newBar = createEmptyBar();
+                      const nextSong = insertBar(sourceSong, previewBarContextMenu, 'after', newBar);
+                      if (nextSong === sourceSong) return;
+                      if (activePreviewEditSession) applyPreviewEditDraft(nextSong);
+                      else commitPreviewBarBatchSong(nextSong, sourceSong);
+                      const insertedTarget = { previewIdentity: previewBarContextMenu.previewIdentity, sectionId: previewBarContextMenu.sectionId, barId: newBar.id! };
+                      setPreviewSelectedBars([insertedTarget]);
+                      previewSelectionAnchorRef.current = insertedTarget;
+                      setPreviewBarContextMenu(null);
+                      if (!activePreviewEditSession) setActiveBar(null);
+                    }}
                     onClear={() => changePreviewBarCells('clear')}
                     onToggleClosed={() => changePreviewBarCells(allClosed ? 'reopen' : 'close')}
                     onEnding={ending => applyPreviewEndingToTargets(ending, 'set', previewBarContextMenu)}
@@ -14361,8 +14638,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
               );
             })()}
             </AnimatePresence>
+            <AnimatePresence initial={false} custom={uiMotion}>
             {activeEditorSong && previewMetaEditTarget && canOpenEditor && !isLyricsMode && (
-              <RecoveryBoundary label="編輯器"><React.Suspense fallback={<div role="status" className="p-4">正在載入編輯器…</div>}><PreviewWysiwygEditor
+              <RecoveryBoundary key={`${activePreviewIdentity ?? 'song'}:${previewMetaEditTarget.field}`} label="編輯器"><React.Suspense fallback={<div role="status" className="p-4">正在載入編輯器…</div>}><PreviewWysiwygEditor
+                key={activePreviewIdentity}
                 song={activeEditorSong}
                 language={language}
                 target={previewMetaEditTarget}
@@ -14403,26 +14682,32 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                 onClose={() => setPreviewMetaEditTarget(null)}
               /></React.Suspense></RecoveryBoundary>
             )}
+            </AnimatePresence>
+            <AnimatePresence initial={false} custom={uiMotion}>
             {isSetlistMode && !isLyricsWorkspace && showPreviewBackToTop && (
-              <div className={`pointer-events-none absolute z-40 ${
+              <PresenceSurface
+                key="preview-back-to-top"
+                {...floatingMotion}
+                className={`pointer-events-none absolute z-40 ${
                 isPhoneViewport ? 'bottom-3 left-3' : 'bottom-2 left-2 sm:bottom-4 sm:left-4 lg:bottom-6 lg:left-6'
               }`}>
                 <button
                   type="button"
                   onClick={handleScrollPreviewToTop}
-                  className="pointer-events-auto inline-flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-white/95 text-gray-600 shadow-lg backdrop-blur-sm transition-colors hover:border-indigo-200 hover:text-indigo-600 sm:h-10 sm:w-10"
+                  className="ui-press pointer-events-auto inline-flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-600 shadow-lg transition-colors hover:border-indigo-200 hover:text-indigo-600 sm:h-10 sm:w-10"
                   title={copy.backToTop}
                   aria-label={copy.backToTop}
                 >
                   <ChevronUp size={18} />
                 </button>
-              </div>
+              </PresenceSurface>
             )}
+            </AnimatePresence>
             {(!isLyricsWorkspace || !isLyricsContinuous) && (
               <div className={`pointer-events-none absolute z-40 ${
                 isPhoneViewport ? 'bottom-3 right-3' : 'bottom-2 right-2 sm:bottom-4 sm:right-4 lg:bottom-6 lg:right-6'
               }`}>
-                <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-gray-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-sm">
+                <div className="pointer-events-auto flex items-center gap-0.5 rounded-xl border border-gray-200 bg-white p-1 shadow-lg">
                   {!isLyricsMode && <span className="contents" ref={setReaderAuditionHost} />}
                   {(canOpenEditor || globalHistory.canUndo || globalHistory.canRedo) && !activePreviewEditSession && (
                     <>
@@ -14431,7 +14716,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                         data-preview-undo
                         onClick={handleActiveUndo}
                         disabled={!globalHistory.canUndo}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-35 sm:h-9 sm:w-9"
+                        className="ui-press inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-35"
                         title={globalHistory.undoEntry ? `${copy.undo} · ${globalHistory.undoEntry.label[language]}` : copy.undo}
                         aria-label={copy.undo}
                       >
@@ -14442,30 +14727,31 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                         data-preview-redo
                         onClick={handleActiveRedo}
                         disabled={!globalHistory.canRedo}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-35 sm:h-9 sm:w-9"
+                        className="ui-press inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-35"
                         title={globalHistory.redoEntry ? `${copy.redo} · ${globalHistory.redoEntry.label[language]}` : copy.redo}
                         aria-label={copy.redo}
                       >
                         <Redo2 size={16} />
                       </button>
-                      {!isLyricsWorkspace && <span className="mx-0.5 h-6 w-px bg-gray-200" aria-hidden="true" />}
+                      {!isLyricsWorkspace && <span className="mx-1 h-5 w-px bg-gray-200" aria-hidden="true" />}
                     </>
                   )}
                   {!isLyricsWorkspace && <><button
                     type="button"
                     onClick={handleZoomOutPreview}
                     disabled={(isLyricsMode && isLyricsReading) || previewScale <= PREVIEW_MIN_SCALE + 0.001}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-lg font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:w-9"
+                    className="ui-press inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
                     title={copy.zoomOutPreview}
+                    aria-label={copy.zoomOutPreview}
                   >
-                    -
+                    <Minus size={15} />
                   </button>
                   <button
                     type="button"
                     ref={previewZoomLabelRef}
                     onClick={handleResetPreviewZoom}
                     disabled={isLyricsMode && isLyricsReading}
-                    className="inline-flex min-w-[4rem] items-center justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 sm:min-w-[4.25rem]"
+                    className="ui-press inline-flex h-9 min-w-[3.75rem] items-center justify-center rounded-lg px-2 text-xs font-semibold tabular-nums text-gray-700 transition-colors hover:bg-gray-100 hover:text-indigo-600 sm:min-w-[4rem]"
                     title={copy.resetPreviewZoom}
                   >
                     {isLyricsMode && isLyricsReading ? '100' : previewScalePercent}%
@@ -14474,10 +14760,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                     type="button"
                     onClick={handleZoomInPreview}
                     disabled={(isLyricsMode && isLyricsReading) || previewScale >= PREVIEW_MAX_SCALE - 0.001}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-lg font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:w-9"
+                    className="ui-press inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
                     title={copy.zoomInPreview}
+                    aria-label={copy.zoomInPreview}
                   >
-                    +
+                    <Plus size={15} />
                   </button></>}
                 </div>
               </div>
@@ -14499,7 +14786,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   type="button"
                   {...backdropMotion}
                   onClick={() => setIsMobileActionsSheetOpen(false)}
-                  className="fixed inset-0 z-[70] bg-stone-950/30 backdrop-blur-[1px]"
+                  className="fixed inset-0 z-[70] bg-stone-950/32"
                   aria-label={copy.editor.more}
                 />
                 <PresenceSurface
@@ -14521,11 +14808,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
 
                   {isSheetView ? (
                     <nav aria-label={language === 'zh' ? '更多選項分類' : 'More options'} className="shrink-0 border-b border-gray-100 px-4 py-3">
-                      <div className="relative grid grid-cols-2 gap-2 rounded-xl">
-                        <SlidingSelection index={mobileActionsSection === 'sheet' ? 0 : 1} count={2} inset={0} gap={8}
-                          className="bg-indigo-50 dark:bg-indigo-950" style={{ borderRadius: 12 }}/>
-                        <button type="button" aria-pressed={mobileActionsSection === 'sheet'} onClick={() => setMobileActionsSection('sheet')} className={`ui-press relative min-h-11 rounded-xl px-3 text-sm font-semibold ${mobileActionsSection === 'sheet' ? 'text-indigo-700 dark:text-indigo-200' : 'text-gray-500 hover:bg-gray-50'}`}>{language === 'zh' ? '譜面操作' : 'Sheet actions'}</button>
-                        <button type="button" aria-pressed={mobileActionsSection === 'settings'} onClick={() => setMobileActionsSection('settings')} className={`ui-press relative min-h-11 rounded-xl px-3 text-sm font-semibold ${mobileActionsSection === 'settings' ? 'text-indigo-700 dark:text-indigo-200' : 'text-gray-500 hover:bg-gray-50'}`}>{language === 'zh' ? '帳號與設定' : 'Account & settings'}</button>
+                      <div className="relative grid grid-cols-2 gap-1 rounded-xl bg-gray-100 p-1 dark:bg-[color:var(--color-surface-sunken)]">
+                        <SlidingSelection index={mobileActionsSection === 'sheet' ? 0 : 1} count={2} inset={4} gap={4}
+                          className="bg-white shadow-sm dark:bg-[color:var(--color-surface-raised)]" style={{ borderRadius: 8 }}/>
+                        <button type="button" aria-pressed={mobileActionsSection === 'sheet'} onClick={() => setMobileActionsSection('sheet')} className={`ui-press relative min-h-10 rounded-lg px-3 text-sm font-semibold transition-colors ${mobileActionsSection === 'sheet' ? 'text-indigo-700 dark:text-indigo-200' : 'text-gray-500 hover:text-gray-800'}`}>{language === 'zh' ? '譜面操作' : 'Sheet actions'}</button>
+                        <button type="button" aria-pressed={mobileActionsSection === 'settings'} onClick={() => setMobileActionsSection('settings')} className={`ui-press relative min-h-10 rounded-lg px-3 text-sm font-semibold transition-colors ${mobileActionsSection === 'settings' ? 'text-indigo-700 dark:text-indigo-200' : 'text-gray-500 hover:text-gray-800'}`}>{language === 'zh' ? '帳號與設定' : 'Account & settings'}</button>
                       </div>
                     </nav>
                   ) : null}
@@ -14541,13 +14828,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                               setIsMobileActionsSheetOpen(false);
                             }}
                             disabled={isExportingPdf}
-                            className={`rounded-2xl px-3 py-3 text-left transition-colors ${
+                            className={`ui-press rounded-2xl px-3.5 py-3 text-left transition-colors ${
                               isExportingPdf
                                 ? 'bg-gray-400 text-white'
-                                : 'bg-gray-900 text-white'
+                                : 'bg-indigo-600 text-white hover:bg-indigo-700'
                             }`}
                           >
-                            <div className="text-xs font-bold uppercase tracking-[0.14em] text-white/70">PDF</div>
+                            <div className="flex items-center gap-1 text-[11px] font-semibold text-white/80"><FileDown size={12} /><span>PDF</span></div>
                             <div className="mt-1 text-sm font-bold">
                               {isExportingPdf ? copy.preparingPdf : (isSetlistMode ? copy.exportSetlistPdf : copy.exportPdf)}
                             </div>
@@ -14559,9 +14846,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                               setIsMobileActionsSheetOpen(false);
                               handleEnterPerformanceMode();
                             }}
-                            className="rounded-2xl border border-gray-200 bg-white px-3 py-3 text-left transition-colors hover:border-indigo-200 hover:bg-indigo-50"
+                            className="ui-press rounded-2xl border border-gray-200 bg-white px-3.5 py-3 text-left transition-colors hover:border-indigo-200 hover:bg-indigo-50"
                           >
-                            <div className="flex items-center gap-1 text-xs font-bold uppercase tracking-[0.14em] text-gray-400"><Play size={11} /><span>Live</span></div>
+                            <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-500"><Play size={12} /><span>Live</span></div>
                             <div className="mt-1 text-sm font-bold text-gray-900">{copy.performanceMode}</div>
                           </button>
                         </div>
@@ -14601,13 +14888,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                               type="button"
                               onClick={handleToggleSongNashvilleMode}
                               disabled={!canEditTeamSongs}
-                              className={`rounded-2xl border px-3 py-3 text-left transition-colors ${
+                              className={`ui-press rounded-2xl border px-3.5 py-3 text-left transition-colors ${
                                 song.showNashvilleNumbers
                                   ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
                                   : 'border-gray-200 bg-white text-gray-700'
                               }`}
                             >
-                              <div className="text-xs font-bold tracking-[0.14em] text-gray-400">{copy.nashvilleModeLabel}</div>
+                              <div className="text-[11px] font-semibold text-gray-500">{copy.nashvilleModeLabel}</div>
                               <div className="mt-1 text-sm font-bold">{song.showNashvilleNumbers ? copy.on : copy.off}</div>
                             </button>
 
@@ -14615,13 +14902,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                               type="button"
                               onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
                               disabled={!canEditTeamSongs}
-                              className={`rounded-2xl border px-3 py-3 text-left transition-colors ${
+                              className={`ui-press rounded-2xl border px-3.5 py-3 text-left transition-colors ${
                                 song.showAbsoluteJianpu
                                   ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
                                   : 'border-gray-200 bg-white text-gray-700'
                               }`}
                             >
-                              <div className="text-xs font-bold tracking-[0.14em] text-gray-400">{copy.fixedDoModeLabel}</div>
+                              <div className="text-[11px] font-semibold text-gray-500">{copy.fixedDoModeLabel}</div>
                               <div className="mt-1 text-sm font-bold">{song.showAbsoluteJianpu ? copy.on : copy.off}</div>
                             </button>
                           </div>
@@ -14630,40 +14917,77 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                     ) : null}
 
                     <div className={!isSheetView || mobileActionsSection === 'settings' ? 'space-y-4' : 'hidden'}>
-                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
-                      <div className="text-xs font-bold uppercase tracking-[0.14em] text-gray-400">{language === 'zh' ? '語言' : 'Language'}</div>
-                      <div className="mt-3 inline-flex items-center rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
-                        <button
-                          type="button"
-                          onClick={() => setLanguage('zh')}
-                          className={`rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${
-                            language === 'zh' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
-                          }`}
-                        >
-                          中文
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setLanguage('en')}
-                          className={`rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${
-                            language === 'en' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
-                          }`}
-                        >
-                          EN
-                        </button>
+                    <div className="space-y-3 rounded-2xl bg-gray-50 p-3 dark:bg-[color:var(--color-surface-sunken)]">
+                      <div>
+                        <div className="text-xs font-semibold text-gray-500">{language === 'zh' ? '外觀主題' : 'Appearance'}</div>
+                        <div className="relative mt-2 grid grid-cols-3 gap-1 rounded-xl bg-gray-100 p-1 dark:bg-[color:var(--color-surface)]">
+                          <SlidingSelection index={themeMode === 'dark' ? 1 : themeMode === 'auto' ? 2 : 0} count={3} inset={4} gap={4}
+                            className="bg-white shadow-sm dark:bg-[color:var(--color-surface-raised)]" style={{ borderRadius: 8 }} />
+                          {([
+                            { value: 'light', icon: Sun, label: language === 'zh' ? '淺色' : 'Light' },
+                            { value: 'dark', icon: Moon, label: language === 'zh' ? '深色' : 'Dark' },
+                            { value: 'auto', icon: MonitorSmartphone, label: language === 'zh' ? '系統' : 'Auto' }
+                          ] as const).map(({ value, icon: Icon, label }) => {
+                            const isActive = themeMode === value;
+                            return (
+                              <button
+                                key={value}
+                                type="button"
+                                onClick={() => setThemeMode(value)}
+                                aria-pressed={isActive}
+                                className={`ui-press relative flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold transition-colors ${
+                                  isActive
+                                    ? 'text-indigo-700 dark:text-indigo-200'
+                                    : 'text-gray-600 hover:text-gray-900 dark:text-[color:var(--color-text-muted)]'
+                                }`}
+                              >
+                                <Icon size={14} />
+                                <span>{label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-semibold text-gray-500">{language === 'zh' ? '語言' : 'Language'}</div>
+                        <div className="relative mt-2 grid grid-cols-2 gap-1 rounded-xl bg-gray-100 p-1 dark:bg-[color:var(--color-surface)]">
+                          <SlidingSelection index={language === 'en' ? 1 : 0} count={2} inset={4} gap={4}
+                            className="bg-white shadow-sm dark:bg-[color:var(--color-surface-raised)]" style={{ borderRadius: 8 }} />
+                          <button
+                            type="button"
+                            onClick={() => setLanguage('zh')}
+                            aria-pressed={language === 'zh'}
+                            className={`ui-press relative min-h-10 rounded-lg px-3 text-xs font-semibold transition-colors ${
+                              language === 'zh' ? 'text-indigo-700 dark:text-indigo-200' : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                          >
+                            中文
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setLanguage('en')}
+                            aria-pressed={language === 'en'}
+                            className={`ui-press relative min-h-10 rounded-lg px-3 text-xs font-semibold transition-colors ${
+                              language === 'en' ? 'text-indigo-700 dark:text-indigo-200' : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                          >
+                            EN
+                          </button>
+                        </div>
                       </div>
                     </div>
 
                     {isAuthenticated ? (
-                      <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
-                        <div className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${
+                      <div className="rounded-2xl border border-gray-200 bg-white p-3">
+                        <div className={`inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-semibold ${
                           syncStatus === 'failed'
                             ? 'bg-rose-50 text-rose-700 ring-1 ring-rose-200'
                             : isOfflineMode
                               ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200'
                               : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
                         }`}>
-                          {isOfflineMode ? <CloudOff size={14} /> : <Cloud size={14} />}
+                          {isOfflineMode ? <CloudOff size={13} /> : <Cloud size={13} />}
                           <span>{syncStatusLabel}</span>
                         </div>
                         <div className="mt-3 flex items-center gap-3">
@@ -14671,7 +14995,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                             <img
                               src={authenticatedUser.picture}
                               alt={authenticatedUser.name}
-                              className="h-10 w-10 rounded-full border border-gray-200 object-cover"
+                              className="h-10 w-10 rounded-full object-cover"
                             />
                           ) : (
                             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">
@@ -14683,40 +15007,49 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                             <div className="truncate text-xs text-gray-500">{authenticatedUser?.email}</div>
                           </div>
                         </div>
+                        <a
+                          href={`${import.meta.env.BASE_URL}ai`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="ui-press mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-100"
+                        >
+                          <ExternalLink size={14} aria-hidden="true" />
+                          <span>{language === 'zh' ? '我的 AI 連線與草稿' : 'My AI connections and drafts'}</span>
+                        </a>
                         <button
                           type="button"
                           onClick={() => {
                             handleGoogleSignOut();
                             setIsMobileActionsSheetOpen(false);
                           }}
-                          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100"
+                          className="ui-press mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100"
                         >
                           <LogOut size={14} />
                           <span>{copy.signOut}</span>
                         </button>
                       </div>
-                    ) : (
-                      <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
+                    ) : !showGoogleAuth ? (
+                      <div className="rounded-2xl border border-gray-200 bg-white p-3">
                         <button
                           type="button"
                           onClick={() => void handleGoogleSignIn()}
                           disabled={!isAuthConfigured}
-                          className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="ui-press flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <ExternalLink size={14} />
                           <span>{copy.continueWithGoogle}</span>
                         </button>
                       </div>
-                    )}
+                    ) : null}
 
-                    {showGoogleAuth && googleUser ? (
-                      <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
+                    {!isAuthenticated && showGoogleAuth && googleUser ? (
+                      <div className="rounded-2xl border border-gray-200 bg-white p-3">
                         <div className="flex items-center gap-3">
                           {googleUser.picture ? (
                             <img
                               src={googleUser.picture}
                               alt={googleUser.name}
-                              className="h-10 w-10 rounded-full border border-gray-200 object-cover"
+                              className="h-10 w-10 rounded-full object-cover"
                             />
                           ) : (
                             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">
@@ -14734,21 +15067,46 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                             handleGoogleSignOut();
                             setIsMobileActionsSheetOpen(false);
                           }}
-                          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100"
+                          className="ui-press mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100"
                         >
                           <LogOut size={14} />
                           <span>{copy.signOut}</span>
                         </button>
                       </div>
-                    ) : showGoogleAuth ? (
-                      <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
-                        <div className="text-xs font-bold uppercase tracking-[0.14em] text-gray-400">Google</div>
+                    ) : !isAuthenticated && showGoogleAuth ? (
+                      <div className="rounded-2xl border border-gray-200 bg-white p-3">
+                        <div className="text-xs font-semibold text-gray-500">Google</div>
                         <div ref={googleSignInRef} className="mt-3 flex min-h-10 min-w-0 items-center justify-start" />
                         {googleAuthError ? (
                           <div className="mt-2 text-xs font-medium text-amber-600">{googleAuthError}</div>
                         ) : null}
                       </div>
                     ) : null}
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleAppViewChange('help');
+                          setIsMobileActionsSheetOpen(false);
+                        }}
+                        className="ui-press flex min-h-11 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
+                      >
+                        <BookOpen size={15} />
+                        <span>{copy.help}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleAppViewChange('about');
+                          setIsMobileActionsSheetOpen(false);
+                        }}
+                        className="ui-press flex min-h-11 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
+                      >
+                        <Info size={15} />
+                        <span>{copy.about}</span>
+                      </button>
+                    </div>
                     {renderGuitaristModeToggle()}
                     </div>
                   </div>
@@ -14757,14 +15115,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
             )}
           </AnimatePresence>
 
-          <>
+          <AnimatePresence initial={false} custom={uiMotion}>
             {isMobileMetadataOpen && canOpenEditor && metadataPanelContent && (
-              <>
+              <React.Fragment key="mobile-metadata-sheet">
                 <PresenceBackdrop
                   type="button"
                   {...backdropMotion}
                   onClick={mobileMetadataMotion.dismiss}
-                  className="absolute inset-0 z-[70] bg-stone-950/30 backdrop-blur-[1px]"
+                  className="absolute inset-0 z-[70] bg-stone-950/32"
                   aria-label={mobileMetadataTitle}
                 />
                 <motion.div
@@ -14779,12 +15137,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   className="absolute inset-x-0 bottom-0 z-[80] flex max-h-[90dvh] flex-col overflow-hidden rounded-t-[28px] border-t border-gray-200 bg-[#F5F5F4] shadow-[0_-24px_60px_rgba(15,23,42,0.18)] dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]"
                 >
                   <div data-sheet-drag-handle className="mx-auto mt-2 h-1.5 w-12 shrink-0 rounded-full bg-gray-300" />
-                  <div data-sheet-drag-handle className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white/90 px-4 py-3 backdrop-blur-sm">
+                  <div data-sheet-drag-handle className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 py-3 dark:bg-[color:var(--color-surface)]">
                     <div className="text-sm font-bold text-gray-900">{mobileMetadataTitle}</div>
                     <button
                       type="button"
                       onClick={mobileMetadataMotion.dismiss}
-                      className="min-h-11 rounded-lg px-3 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-50"
+                      className="ui-press min-h-11 rounded-lg px-3 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-50"
                     >
                       {copy.done}
                     </button>
@@ -14794,9 +15152,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                     {metadataPanelContent}
                   </div>
                 </motion.div>
-              </>
+              </React.Fragment>
             )}
-                    </>
+          </AnimatePresence>
         </>
       )}
 
@@ -14831,7 +15189,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   value={newSetlistName}
                   onChange={(event) => setNewSetlistName(event.target.value)}
                   autoFocus
-                  className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm font-semibold text-gray-900 outline-none transition-colors focus:border-indigo-300 focus:bg-white"
+                  className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-base font-semibold text-gray-900 outline-none transition-colors focus:border-indigo-300 focus:bg-white sm:text-sm"
                   placeholder={copy.untitledSetlist}
                 />
               </label>
@@ -14841,7 +15199,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                 <select
                   value={newSetlistProjectId}
                   onChange={(event) => setNewSetlistProjectId(event.target.value)}
-                  className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300"
+                  className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-base font-semibold text-gray-700 outline-none focus:border-indigo-300 sm:text-sm"
                 >
                   <option value="">{language === 'zh' ? '不放入專案（根目錄）' : 'No project (root)'}</option>
                   {activeProjects.map((project) => (
@@ -14860,14 +15218,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                 <button
                   type="button"
                   onClick={() => setIsCreateSetlistOpen(false)}
-                  className="h-11 rounded-xl border border-gray-200 bg-white px-4 text-sm font-bold text-gray-600 transition-colors hover:bg-gray-50"
+                  className="ui-press h-11 rounded-xl border border-gray-200 bg-white px-4 text-sm font-bold text-gray-600 transition-colors hover:bg-gray-50"
                 >
                   {copy.cancel}
                 </button>
                 <button
                   type="submit"
                   disabled={!canCreateTeamSetlists || !newSetlistName.trim() || !canManageProjectById(newSetlistProjectId || null)}
-                  className="h-11 rounded-xl bg-indigo-600 px-4 text-sm font-bold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-gray-300"
+                  className="ui-press h-11 rounded-xl bg-indigo-600 px-4 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
                 >
                   {language === 'zh' ? '建立歌單' : 'Create setlist'}
                 </button>
@@ -14881,16 +15239,16 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         {isImportPromptOpen && authenticatedUser && (
           <PresenceSurface
             {...backdropMotion}
-            className="absolute inset-0 z-[110] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
+            className="absolute inset-0 z-[110] flex items-center justify-center bg-stone-950/38 px-4"
           >
             <PresenceSurface
               {...modalMotion}
-              className="w-full max-w-lg rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
+              className="w-full max-w-lg rounded-3xl border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
             >
-              <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{APP_NAME}</div>
-              <h2 className="mt-2 text-2xl font-bold tracking-tight text-gray-900">{copy.importLocalTitle}</h2>
+              <div className="text-xs font-semibold text-gray-500">{APP_NAME}</div>
+              <h2 className="mt-1.5 text-2xl font-bold tracking-tight text-gray-900">{copy.importLocalTitle}</h2>
               <p className="mt-3 text-sm leading-6 text-gray-600">{copy.importLocalDescription}</p>
-              <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700">
+              <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold tabular-nums text-gray-700">
                 {importSummaryLabel}
               </div>
               <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -14898,7 +15256,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   type="button"
                   onClick={handleDismissImportPrompt}
                   disabled={isImportingLocalWorkspace}
-                  className="inline-flex items-center justify-center rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="ui-press inline-flex min-h-11 items-center justify-center rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {copy.importLater}
                 </button>
@@ -14906,7 +15264,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   type="button"
                   onClick={() => void handleImportLocalWorkspaceToCloud()}
                   disabled={isImportingLocalWorkspace}
-                  className="inline-flex items-center justify-center rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="ui-press inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isImportingLocalWorkspace ? copy.cloudSyncSyncing : copy.importNow}
                 </button>
@@ -14925,13 +15283,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         {isExportingPdf && (
           <PresenceSurface
             {...backdropMotion}
-            className="absolute inset-0 z-[120] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
+            className="absolute inset-0 z-[120] flex items-center justify-center bg-stone-950/38 px-4"
             aria-live="polite"
             aria-busy="true"
           >
             <PresenceSurface
               {...modalMotion}
-              className="w-full max-w-sm rounded-[28px] border border-gray-200 bg-white/95 px-6 py-6 text-center shadow-[0_24px_60px_rgba(15,23,42,0.22)] backdrop-blur-sm"
+              className="w-full max-w-sm rounded-3xl border border-gray-200 bg-white px-6 py-6 text-center shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
             >
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-indigo-50">
                 <div className="h-7 w-7 rounded-full border-[3px] border-indigo-200 border-t-indigo-600 animate-spin motion-reduce:animate-none" />
@@ -14954,14 +15312,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
 
                   <div className="mt-3 flex items-center justify-between text-xs font-semibold text-gray-500">
                     <span>{copy.exportingPdfPageLabel}</span>
-                    <span>{pdfExportProgress.completedPages} / {pdfExportProgress.totalPages}</span>
+                    <span className="tabular-nums">{pdfExportProgress.completedPages} / {pdfExportProgress.totalPages}</span>
                   </div>
 
                   <div className="mt-3 grid gap-2 rounded-2xl bg-gray-50 px-4 py-3 text-sm text-gray-700">
                     <div className="flex items-start justify-between gap-3">
                       <span className="font-semibold text-gray-500">{copy.exportingPdfSongLabel}</span>
                       <div className="min-w-0 text-right">
-                        <div className="font-bold text-gray-900">
+                        <div className="font-bold tabular-nums text-gray-900">
                           {pdfExportProgress.songIndex} / {pdfExportProgress.totalSongs}
                         </div>
                         <div className="truncate text-xs text-gray-500">{pdfExportProgress.songTitle}</div>
@@ -14972,7 +15330,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                       <span className="font-semibold text-gray-500">{copy.exportingPdfSectionLabel}</span>
                       <div className="min-w-0 text-right">
                         <div className="font-bold text-gray-900">{exportSectionLabel}</div>
-                        <div className="text-xs text-gray-500">
+                        <div className="text-xs tabular-nums text-gray-500">
                           {copy.exportingPdfPageLabel} {pdfExportProgress.pageInSong} / {pdfExportProgress.totalPagesInSong}
                         </div>
                       </div>
@@ -14983,7 +15341,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
 
               <div className="mt-4">
                 {pdfExportProgress?.cancelRequested ? (
-                  <div className="text-xs font-semibold tracking-[0.08em] text-gray-400">{copy.exportingPdfCancelling}</div>
+                  <div className="text-xs font-semibold text-gray-400">{copy.exportingPdfCancelling}</div>
                 ) : (
                   <button
                     type="button"
@@ -14991,7 +15349,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                       pdfExportCancelRequestedRef.current = true;
                       setPdfExportProgress((current) => current ? { ...current, cancelRequested: true } : current);
                     }}
-                    className="rounded-full bg-gray-100 px-5 py-2 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-200 active:bg-gray-300"
+                    className="ui-press min-h-11 rounded-xl bg-gray-100 px-5 py-2 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-200 active:bg-gray-300"
                   >
                     {copy.exportingPdfCancelButton}
                   </button>
@@ -15007,21 +15365,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
           <PresenceSurface
             key="leave-setlist-confirm"
             {...backdropMotion}
-            className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
+            className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/38 px-4"
           >
             <PresenceSurface
               {...modalMotion}
-              className="w-full max-w-md rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
+              className="w-full max-w-md rounded-3xl border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
             >
-              <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{copy.sharedWithMe}</div>
-              <h2 className="mt-2 text-xl font-bold tracking-tight text-gray-900">{copy.leaveSetlistConfirm}</h2>
+              <div className="text-xs font-semibold text-gray-500">{copy.sharedWithMe}</div>
+              <h2 className="mt-1.5 text-xl font-bold tracking-tight text-gray-900">{copy.leaveSetlistConfirm}</h2>
               <p className="mt-3 text-sm font-semibold text-gray-600">{pendingLeaveSharedSetlist.name || copy.untitledSetlist}</p>
               <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <button
                   type="button"
                   onClick={() => setPendingLeaveSharedSetlistId(null)}
                   disabled={Boolean(leavingSharedSetlistId)}
-                  className="inline-flex items-center justify-center rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
+                  className="ui-press inline-flex min-h-11 items-center justify-center rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
                 >
                   {copy.cancel}
                 </button>
@@ -15029,7 +15387,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   type="button"
                   onClick={() => void handleLeaveSharedSetlist(pendingLeaveSharedSetlist.id)}
                   disabled={leavingSharedSetlistId === pendingLeaveSharedSetlist.id}
-                  className="inline-flex items-center justify-center rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60"
+                  className="ui-press inline-flex min-h-11 items-center justify-center rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60"
                 >
                   {leavingSharedSetlistId === pendingLeaveSharedSetlist.id ? copy.leavingSetlist : copy.leaveSetlist}
                 </button>
@@ -15041,21 +15399,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
           <PresenceSurface
             key="leave-project-confirm"
             {...backdropMotion}
-            className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
+            className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/38 px-4"
           >
             <PresenceSurface
               {...modalMotion}
-              className="w-full max-w-md rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
+              className="w-full max-w-md rounded-3xl border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
             >
-              <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{copy.sharedWithMe}</div>
-              <h2 className="mt-2 text-xl font-bold tracking-tight text-gray-900">{copy.leaveProjectConfirm}</h2>
+              <div className="text-xs font-semibold text-gray-500">{copy.sharedWithMe}</div>
+              <h2 className="mt-1.5 text-xl font-bold tracking-tight text-gray-900">{copy.leaveProjectConfirm}</h2>
               <p className="mt-3 text-sm font-semibold text-gray-600">{pendingLeaveSharedProject.name || copy.untitledProject}</p>
               <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <button
                   type="button"
                   onClick={() => setPendingLeaveSharedProjectId(null)}
                   disabled={Boolean(leavingSharedProjectId)}
-                  className="inline-flex items-center justify-center rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
+                  className="ui-press inline-flex min-h-11 items-center justify-center rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
                 >
                   {copy.cancel}
                 </button>
@@ -15063,7 +15421,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   type="button"
                   onClick={() => void handleLeaveSharedProject(pendingLeaveSharedProject.id)}
                   disabled={leavingSharedProjectId === pendingLeaveSharedProject.id}
-                  className="inline-flex items-center justify-center rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60"
+                  className="ui-press inline-flex min-h-11 items-center justify-center rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60"
                 >
                   {leavingSharedProjectId === pendingLeaveSharedProject.id ? copy.leavingProject : copy.leaveProject}
                 </button>
@@ -15096,6 +15454,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
             onShare={ids.length === 1 && canCreateNewShareLink ? () => { void handleCreateShareLink('setlist', target.id); } : undefined}
             onSelect={() => setMultiSelectedSetlistIds(ids)}
             onMove={() => setProjectPicker({ mode: 'move', setlistIds: ids })}
+            onCopy={() => setProjectPicker({ mode: 'copy', setlistIds: ids })}
             onDelete={() => usesSelection ? handleBatchDeleteSelectedSetlists() : handleDeleteSetlist(target.id)}
           />
         );
@@ -15107,10 +15466,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
           <PresenceSurface
             key="setlist-bulk-actions"
             {...feedbackMotion}
-            className="pointer-events-none fixed inset-x-0 bottom-4 z-[120] flex justify-center px-3"
+            className="pointer-events-none fixed inset-x-0 bottom-[max(1rem,env(safe-area-inset-bottom))] z-[120] flex justify-center px-3"
           >
             <div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-[0_18px_44px_rgba(15,23,42,0.18)]">
-              <div className="px-2 text-sm font-bold text-gray-700">
+              <div className="px-2 text-sm font-bold tabular-nums text-gray-700">
                 {language === 'zh'
                   ? `已選 ${multiSelectedSetlistIds.length}`
                   : `${multiSelectedSetlistIds.length} selected`}
@@ -15118,15 +15477,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
               <button
                 type="button"
                 onClick={() => setProjectPicker({ mode: 'move', setlistIds: multiSelectedSetlistIds })}
-                className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100"
+                className="ui-press inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100"
               >
-                <FileText size={14} />
+                <FolderInput size={14} />
                 <span>{copy.moveSetlistToProject}</span>
               </button>
               <button
                 type="button"
                 onClick={() => setProjectPicker({ mode: 'copy', setlistIds: multiSelectedSetlistIds })}
-                className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100"
+                className="ui-press inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100"
               >
                 <Copy size={14} />
                 <span>{copy.copySetlistToProject}</span>
@@ -15138,7 +15497,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   <button
                     type="button"
                     onClick={() => handleBatchArchiveSelectedSetlists(!allArchived)}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100"
+                    className="ui-press inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100"
                   >
                     {allArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
                     <span>{allArchived ? copy.unarchiveSetlist : copy.archiveSetlist}</span>
@@ -15148,7 +15507,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
               <button
                 type="button"
                 onClick={handleBatchDeleteSelectedSetlists}
-                className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100"
+                className="ui-press inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100"
               >
                 <Trash2 size={14} />
                 <span>{copy.delete}</span>
@@ -15156,7 +15515,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
               <button
                 type="button"
                 onClick={exitMultiSelect}
-                className="inline-flex shrink-0 items-center justify-center rounded-xl border border-gray-200 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-50"
+                className="ui-press inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-50"
               >
                 {copy.cancel}
               </button>
@@ -15218,21 +15577,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         {pendingRevokeShareSetlist && (
           <PresenceSurface
             {...backdropMotion}
-            className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
+            className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/38 px-4"
           >
             <PresenceSurface
               {...modalMotion}
-              className="w-full max-w-md rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
+              className="w-full max-w-md rounded-3xl border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
             >
-              <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{copy.setlistSharingTitle}</div>
-              <h2 className="mt-2 text-xl font-bold tracking-tight text-gray-900">{copy.setlistSharingCancelConfirm}</h2>
+              <div className="text-xs font-semibold text-gray-500">{copy.setlistSharingTitle}</div>
+              <h2 className="mt-1.5 text-xl font-bold tracking-tight text-gray-900">{copy.setlistSharingCancelConfirm}</h2>
               <p className="mt-3 text-sm font-semibold text-gray-600">{pendingRevokeShareSetlist.name || copy.untitledSetlist}</p>
               <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <button
                   type="button"
                   onClick={() => setPendingRevokeShareSetlistId(null)}
                   disabled={isRevokingSetlistShare}
-                  className="inline-flex items-center justify-center rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
+                  className="ui-press inline-flex min-h-11 items-center justify-center rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
                 >
                   {copy.cancel}
                 </button>
@@ -15240,7 +15599,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   type="button"
                   onClick={() => void handleRevokeSetlistSharing(pendingRevokeShareSetlist.id)}
                   disabled={isRevokingSetlistShare}
-                  className="inline-flex items-center justify-center rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60"
+                  className="ui-press inline-flex min-h-11 items-center justify-center rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60"
                 >
                   {isRevokingSetlistShare ? copy.cloudSyncSyncing : copy.setlistSharingCancel}
                 </button>
@@ -15263,7 +15622,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       <AnimatePresence custom={uiMotion}>
         {isPreviewEditExitPromptOpen && previewEditSession?.dirty && (
           <PresenceSurface
-            className="fixed inset-0 z-[6000] flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-[2px]"
+            className="fixed inset-0 z-[6000] flex items-center justify-center bg-slate-950/38 p-4"
             {...backdropMotion}
           >
             <PresenceSurface
@@ -15271,9 +15630,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
               aria-modal="true"
               aria-label={language === 'zh' ? '預覽編輯尚未完成' : 'Preview edit is unfinished'}
               {...modalMotion}
-              className="w-full max-w-md rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_28px_80px_rgba(15,23,42,0.3)]"
+              className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_28px_80px_rgba(15,23,42,0.3)]"
             >
-              <h2 className="text-lg font-black text-slate-900">{language === 'zh' ? '預覽編輯尚未完成' : 'Preview edit is unfinished'}</h2>
+              <h2 className="text-lg font-bold text-slate-900">{language === 'zh' ? '預覽編輯尚未完成' : 'Preview edit is unfinished'}</h2>
               <p className="mt-2 text-sm leading-6 text-slate-600">{language === 'zh'
                 ? `${previewDraftChange?.location} ·「${previewDraftChange?.name}」：${previewDraftChange?.detail}。要完成這次修改嗎？`
                 : `${previewDraftChange?.location} · “${previewDraftChange?.name}”: ${previewDraftChange?.detail}. Finish this edit?`}</p>
@@ -15387,8 +15746,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
 
       {liveDrummerSession && <DrummerMode key={liveDrummerSession.instanceId ?? liveDrummerSession.id ?? liveDrummerSession.name} {...liveDrummerSession} userId={authenticatedUser?.id} language={language} onClose={closeDrummerMode}/>}
 
+      <AnimatePresence initial={false} custom={uiMotion}>
       {activeReferenceKind && activeReferenceSong && (
         <ReferencePlayer
+          key="reference-player"
           song={activeReferenceSong}
           currentKey={activeReferenceCurrentKey}
           activeKind={activeReferenceKind}
@@ -15397,6 +15758,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
           onClose={() => setActiveReferenceKind(null)}
         />
       )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {isHomeScreenGuideOpen && homeScreenInstall.shouldShowInstallGuide && (

@@ -23,6 +23,8 @@ export function ManagementActions({ label, actions, disabled = false, triggerCon
     return () => document.removeEventListener('pointerdown', outside, true);
   }, [open, close]);
   useEffect(() => { if (open && isPositioned) panel.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true }); }, [open, isPositioned]);
+  if (actions.length === 0) return null;
+  const firstDangerIndex = actions.findIndex(action => action.danger);
   return <>
     <button ref={trigger} type='button' className={triggerContent ? 'pm-new-button ui-press' : 'pm-icon-button ui-press'} disabled={disabled} aria-label={label} aria-haspopup='menu' aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => { setHasOpened(true); setOpen(value => !value); }}>{triggerContent ?? <MoreHorizontal size={19} />}</button>
     {hasOpened && createPortal(<AnimatedPopover animateOnMount open={open} ready={isPositioned} origin={transformOrigin} panelRef={panel} id={id} role='menu' aria-label={label} data-placement={placement} style={panelStyle} className='pm-actions-menu'
@@ -37,7 +39,10 @@ export function ManagementActions({ label, actions, disabled = false, triggerCon
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); trigger.current?.focus({ preventScroll: true }); }
         if (event.key === 'Tab') { close(); trigger.current?.focus({ preventScroll: true }); }
       }}>
-      {actions.map(action => <button key={action.label} type='button' role='menuitem' disabled={action.disabled} className={'pm-menu-item' + (action.danger ? ' danger' : '')} onClick={() => { close(); trigger.current?.focus({ preventScroll: true }); action.run(); }}>{action.icon}<span>{action.label}</span></button>)}
+      {actions.map((action, index) => <span key={action.label} className='contents'>
+        {index > 0 && index === firstDangerIndex && <div role='separator' className='pm-menu-separator' />}
+        <button type='button' role='menuitem' disabled={action.disabled} className={'pm-menu-item ui-press' + (action.danger ? ' danger' : '')} onClick={() => { close(); trigger.current?.focus({ preventScroll: true }); action.run(); }}>{action.icon}<span>{action.label}</span></button>
+      </span>)}
     </AnimatedPopover>, document.body)}
   </>;
 }

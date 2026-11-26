@@ -95,6 +95,16 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-26',
+        title: 'Remove selected songs and use refreshed controls',
+        bullets: [
+          'Choose Select to remove in a setlist, check each song, then remove the selection. Songs stay in the library and you can undo the batch.',
+          'Confirmation and rename dialogs stay in the app, including confirmation over the team management dialog.',
+          'Refined feedback for menus, notifications and dialogs, plus improvements to dark mode, shortcut search, song maps and mobile forms.'
+        ]
+      },
+      {
+        version: '0.12.64',
+        date: '2026-11-26',
         title: 'Offbeat chord entry',
         bullets: ['The chord keyboard shows downbeats by default. Press & to add a second chord on the same beat, or tap &+ on touchscreens. Open the position menu for e and a.']
       },
@@ -1366,6 +1376,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-26',
+        title: '歌單多選移除與介面細節',
+        bullets: [
+          '打開歌單後點「多選移除」，逐首勾選再確認移出。歌曲仍保留在歌曲庫，可整批撤銷。',
+          '確認和重新命名改用 App 內視窗，團隊成員的確認窗會出現在目前視窗上方。',
+          '調整選單、通知與部分視窗的動態回饋，並改善深色模式、快捷鍵搜尋、曲序編輯和手機表單。'
+        ]
+      },
+      {
+        version: '0.12.64',
         date: '2026-11-26',
         title: '拍內和弦輸入',
         bullets: ['和弦輸入平常只顯示正拍。按 & 即可在同一拍加入第二個和弦，觸控可點 &+。需要 e 或 a 時，再展開拍位選單。']

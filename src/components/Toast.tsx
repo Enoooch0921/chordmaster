@@ -2,7 +2,7 @@ import { useKeyboardMotionInterrupt, useUiMotion } from '../hooks/useUiMotion';
 import { notificationVariants, UI_EASE_OUT, type UiMotionPreference } from '../lib/uiMotion';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useIsPresent, useMotionValue } from 'motion/react';
-import { CheckCircle2, AlertCircle, Loader2, X } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Info, Loader2, X } from 'lucide-react';
 
 export type ToastVariant = 'success' | 'error' | 'loading' | 'info';
 
@@ -179,7 +179,7 @@ const variantStyles: Record<ToastVariant, { icon: typeof CheckCircle2; iconClass
     ringClass: 'ring-[color:var(--color-indigo-100)] dark:ring-[color:var(--color-indigo-900)]'
   },
   info: {
-    icon: AlertCircle,
+    icon: Info,
     iconClass: 'text-[color:var(--color-text-muted)]',
     ringClass: 'ring-[color:var(--color-border)]'
   }
@@ -190,8 +190,10 @@ const ToastViewport = ({ items, onDismiss, setPaused, placement = 'default' }: {
   return <div data-toast-viewport={placement} aria-live="polite" aria-atomic="false"
     className={`pointer-events-none fixed z-[100] flex w-[min(92vw,360px)] flex-col gap-2 ${placement === 'history'
       ? 'left-1/2 -translate-x-1/2'
-      : 'bottom-4 right-4'}`}
-    style={placement === 'history' ? { top: 'calc(env(safe-area-inset-top, 0px) + 16px)' } : undefined}>
+      : 'right-4'}`}
+    style={placement === 'history'
+      ? { top: 'calc(env(safe-area-inset-top, 0px) + 16px)' }
+      : { bottom: 'calc(env(safe-area-inset-bottom, 0px) + 76px)' }}>
     <AnimatePresence initial={false} custom={preference}>
       {items.map(item => <ToastCard key={item.id} item={item} onDismiss={onDismiss} setPaused={setPaused} preference={preference} />)}
     </AnimatePresence>

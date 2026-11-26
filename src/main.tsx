@@ -13,6 +13,7 @@ const AuthCallbackPage = lazy(() => import('./pages/AuthCallbackPage.tsx'));
 const SharedChartPage = lazy(() => import('./pages/SharedChartPage.tsx'));
 const TeamInvitePage = lazy(() => import('./pages/TeamInvitePage.tsx'));
 import { ToastProvider } from './components/Toast.tsx';
+import { AppDialogProvider } from './components/ui/AppDialogProvider.tsx';
 import { registerAppFontFaces, waitForAppFontsReady } from './lib/fontFaceAssets.ts';
 import './index.css';
 import './styles/dark-ui.css';
@@ -132,6 +133,7 @@ const renderApp = () => {
     <StrictMode>
       <BrowserRouter basename={routerBasename}>
         <ToastProvider>
+          <AppDialogProvider>
           <InvitationTransitionProvider>
           <RecoveryBoundary>
           <Suspense fallback={<AppLoadingScreen />}>
@@ -144,6 +146,7 @@ const renderApp = () => {
           </Suspense>
           </RecoveryBoundary>
           </InvitationTransitionProvider>
+          </AppDialogProvider>
         </ToastProvider>
       </BrowserRouter>
     </StrictMode>,

@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDownWideNarrow, ChevronLeft, Search, X } from 'lucide-react';
+import { AnimatedDisclosure } from './ui/InteractionMotion';
 
 interface Props {
   title: string;
@@ -124,7 +125,7 @@ export default function SetlistBrowserHeader({
       {projectAction}
     </div>
     {isRoot ? <>
-      {searchVisible && searchField}
+      <AnimatedDisclosure open={searchVisible}>{searchField}</AnimatedDisclosure>
       {countLabel && <div className="setlist-browser-options"><span>{countLabel}</span>{sortPicker}</div>}
     </> : <>
       <div className="setlist-project-toolbar">
@@ -140,7 +141,7 @@ export default function SetlistBrowserHeader({
           </span>
         </div>
       </div>
-      {searchVisible && searchField}
+      <AnimatedDisclosure open={searchVisible}>{searchField}</AnimatedDisclosure>
     </>}
     {archiveAction}
   </div>;

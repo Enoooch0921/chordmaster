@@ -1,7 +1,11 @@
 import React from 'react';
+import { AnimatePresence } from 'motion/react';
 import { X } from 'lucide-react';
 import type { AppLanguage } from '../../types';
 import type { PreviewEditSession } from '../../lib/previewEditSession';
+import { useUiMotion } from '../../hooks/useUiMotion';
+import { popoverVariants } from '../../lib/uiMotion';
+import { PresenceSurface } from '../ui/InteractionMotion';
 
 interface PreviewSectionTitleEditorProps {
   session: PreviewEditSession;
@@ -79,6 +83,7 @@ const PreviewSectionTitleEditor: React.FC<PreviewSectionTitleEditorProps> = ({
   onDone,
   onCancel
 }) => {
+  const uiMotion = useUiMotion();
   const section = session.draftSong.sections.find((candidate) => candidate.id === session.target.sectionId);
   const [draft, setDraft] = React.useState(section?.title ?? '');
   const [suggestionsOpen, setSuggestionsOpen] = React.useState(false);
@@ -165,7 +170,7 @@ const PreviewSectionTitleEditor: React.FC<PreviewSectionTitleEditorProps> = ({
     <div
       ref={shellRef}
       data-preview-section-title-editor
-      className="fixed z-[5200] flex items-stretch rounded-sm bg-white/98 shadow-[0_0_0_2px_rgba(79,70,229,0.55),0_12px_28px_rgba(15,23,42,0.2)] backdrop-blur"
+      className="fixed z-[5200] flex items-stretch rounded-sm bg-white shadow-[0_0_0_2px_rgba(79,70,229,0.55),0_12px_28px_rgba(15,23,42,0.2)]"
       style={{ left, top, width, height: Math.max(28, anchor.height) }}
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
@@ -238,18 +243,26 @@ const PreviewSectionTitleEditor: React.FC<PreviewSectionTitleEditorProps> = ({
       >
         <X size={15} />
       </button>
+      <AnimatePresence initial={false} custom={uiMotion}>
       {showSuggestions && (
-        <div
+        <PresenceSurface
+          key="section-title-suggestions"
           id={suggestionListId}
           role="listbox"
           aria-label={language === 'zh' ? '段落名稱建議' : 'Section title suggestions'}
-          className="absolute z-[5210] overflow-y-auto rounded-xl border border-slate-200 bg-white/98 p-1.5 shadow-[0_16px_36px_rgba(15,23,42,0.24)] backdrop-blur"
+          custom={uiMotion}
+          variants={popoverVariants}
+          initial={uiMotion.instant ? false : 'hidden'}
+          animate="visible"
+          exit="exit"
+          className="absolute z-[5210] overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_16px_36px_rgba(15,23,42,0.24)]"
           style={{
             left: 0,
             top: openSuggestionsAbove ? undefined : 'calc(100% + 6px)',
             bottom: openSuggestionsAbove ? 'calc(100% + 6px)' : undefined,
             width: dropdownWidth,
-            maxHeight: isMobile ? 240 : 210
+            maxHeight: isMobile ? 240 : 210,
+            transformOrigin: openSuggestionsAbove ? '0% 100%' : '0% 0%'
           }}
         >
           <div className="px-2 pb-1 pt-0.5 text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">
@@ -270,8 +283,9 @@ const PreviewSectionTitleEditor: React.FC<PreviewSectionTitleEditorProps> = ({
               {title}
             </button>
           ))}
-        </div>
+        </PresenceSurface>
       )}
+      </AnimatePresence>
     </div>
   );
 };

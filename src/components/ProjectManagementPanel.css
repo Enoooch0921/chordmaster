@@ -48,7 +48,9 @@
 .pm-menu-item{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;border-radius:8px;padding:10px 12px;text-align:left;font-size:13px;line-height:1.6}
 .pm-menu-item:hover{background:var(--color-surface-sunken)}
 .pm-menu-item>svg{flex-shrink:0}
-.pm-menu-item.danger{color:var(--color-danger);border-top:1px solid var(--color-border);border-radius:0 0 8px 8px;margin-top:4px}
+.pm-menu-item.danger{color:var(--color-danger)}
+.pm-menu-item.danger:hover{background:var(--color-danger-soft)}
+.pm-menu-separator{height:1px;margin:4px 4px;background:var(--color-border)}
 .project-manager button:disabled,.project-manager select:disabled,.pm-menu-item:disabled{opacity:.5;cursor:default}
 .project-manager button:focus-visible,.project-manager select:focus-visible,.pm-menu-item:focus-visible,.pm-icon-button:focus-visible,.pm-new-button:focus-visible{outline:2px solid var(--color-indigo-600);outline-offset:2px}
 @media(max-width:600px){
@@ -118,12 +120,28 @@
 .setlist-detail-scroll{min-height:0;flex:1;overflow-y:auto;overscroll-behavior:contain;padding:8px 12px 20px}
 /* Released mobile song rows: title and actions above independent quick settings. */
 .setlist-detail-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px;font-size:12px;color:var(--color-text-muted)}
+.setlist-detail-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:4px 8px}
+.setlist-detail-actions>button{min-height:44px}
+.setlist-song-batch-toolbar{border-top:1px solid var(--color-border)}
+.setlist-song-selection-count{color:var(--color-text);font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+.setlist-song-batch-remove{color:var(--color-danger)}
+.setlist-song-batch-remove:hover:not(:disabled){background:var(--color-danger-soft)}
+.setlist-song-batch-remove:disabled{opacity:.45;cursor:default}
 [data-setlist-detail-header] .setlist-browser-title{margin-bottom:0}
 [data-setlist-detail-header]{padding-top:6px;padding-bottom:4px;background:var(--color-surface-muted)}
 .setlist-song-list{margin:0}
-.setlist-song-row{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 88px;min-height:156px;border-bottom:1px solid var(--color-border);color:var(--color-text);background:var(--color-surface);user-select:none}
+.setlist-song-batch-row{display:grid;grid-template-columns:20px minmax(19px,max-content) minmax(0,1fr);align-items:center;gap:9px;min-height:48px;padding:8px 12px;border-bottom:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text);cursor:pointer;touch-action:manipulation}
+.setlist-song-batch-row:last-child{border-bottom:0}
+.setlist-song-batch-row:hover{background:var(--color-surface-muted)}
+.setlist-song-batch-row:has(input:checked){background:var(--color-indigo-50)}
+.setlist-song-batch-row:has(input:focus-visible){outline:2px solid var(--color-indigo-600);outline-offset:-2px}
+.setlist-song-batch-row input{width:19px;height:19px;margin:0;accent-color:var(--color-indigo-700);cursor:pointer}
+.setlist-song-batch-row .setlist-song-title{font-size:15px;line-height:21px}
+.setlist-song-batch-index{color:var(--color-text-muted);font-variant-numeric:tabular-nums;text-align:center}
+.dark .setlist-song-batch-row:has(input:checked){background:var(--color-indigo-950)}
+.setlist-song-row{position:relative;contain:layout style;display:grid;grid-template-columns:minmax(0,1fr) 88px;min-height:156px;border-bottom:1px solid var(--color-border);color:var(--color-text);background:var(--color-surface);user-select:none}
 .setlist-song-row:last-child{border-bottom:0}
-.setlist-song-reading{position:relative;isolation:isolate;min-width:0;padding:8px 12px 18px}
+.setlist-song-reading{position:relative;isolation:isolate;min-width:0;padding:8px 12px 18px;transition:background-color var(--ui-release-duration) var(--ease-ui-out),color var(--ui-release-duration) var(--ease-ui-out)}
 .setlist-song-row:not(.is-current) .setlist-song-reading:hover{background:var(--color-surface-muted)}
 .setlist-song-row.is-current .setlist-song-reading{background:var(--color-indigo-700);color:var(--color-indigo-50)}
 .setlist-song-row.is-drop-target::after{content:'';position:absolute;top:-1px;left:0;right:0;height:2px;background:var(--color-indigo-600);pointer-events:none}

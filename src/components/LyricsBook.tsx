@@ -173,7 +173,7 @@ export default function LyricsBook({ title, entries, language, settings, onSetti
   const displayedPages = isReading ? readingPages : pages;
 
   return <div className="lyrics-sheet lyrics-book flex flex-col gap-6 text-stone-900" data-book-layout={isReading ? 'reading' : layout} data-preview-suppress-pan="true" style={{ fontFamily }}>
-    {!exportMode && !hideControls && <div data-preview-only-control className="flex flex-wrap items-center gap-3 rounded-xl border border-stone-200 bg-white p-4 text-sm" style={{ fontFamily: 'Arial, sans-serif' }}>
+    {!exportMode && !hideControls && <div data-preview-only-control className="flex flex-wrap items-center gap-3 rounded-xl border border-stone-200 bg-white p-4 text-sm" style={{ fontFamily: 'var(--font-sans)' }}>
       <div className="flex w-full flex-wrap items-center gap-3">
         <span className="mr-auto font-bold">{zh ? '歌單歌詞' : 'Setlist lyrics'}</span>
         <div role="group" aria-label={zh ? '歌詞版面' : 'Lyrics layout'} className="flex flex-wrap gap-1 rounded-lg bg-stone-100 p-1">

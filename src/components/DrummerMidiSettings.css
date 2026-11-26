@@ -1,5 +1,6 @@
 .drummer-midi-button { flex-shrink: 0; font-size: 13px; }
 .drummer-midi-button[data-connected="true"] { color: var(--color-indigo-700); }
+.dark .drummer-midi-button[data-connected="true"] { color: var(--color-indigo-300); }
 .drummer-mode[data-stage="true"] .drummer-midi-button > span { display: none; }
 .drummer-mode[data-stage="true"] .drummer-midi-button { min-width: 44px; }
 .drummer-mode[data-stage="true"] .drummer-header h1 { overflow: hidden; text-overflow: ellipsis; }
@@ -43,6 +44,7 @@
 .drummer-midi-panel[data-source="keyboard"] .drummer-midi-mapping-heading { margin-top: 12px; }
 .drummer-midi-panel[data-source="keyboard"] .drummer-input-sources { margin-bottom: 12px; }
 .drummer-midi-mapping[data-learning="true"] { color: var(--color-indigo-700); }
+.dark .drummer-midi-mapping[data-learning="true"] { color: var(--color-indigo-300); }
 @media (min-width: 560px) {
   .drummer-profile-fields { grid-template-columns: 1fr 1fr; }
   .drummer-control-mappings { display: grid; grid-template-columns: 1fr 1fr; column-gap: 16px; }

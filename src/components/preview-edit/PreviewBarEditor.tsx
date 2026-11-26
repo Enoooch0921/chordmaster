@@ -1206,8 +1206,8 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       >
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[10px] font-black uppercase tracking-[0.12em] text-indigo-500">{section?.title}</div>
-            <div className="truncate text-sm font-black text-slate-900">
+            <div className="truncate text-[11px] font-semibold text-indigo-600">{section?.title}</div>
+            <div className="truncate text-sm font-bold text-slate-900">
               {isDeleted
                 ? (language === 'zh' ? '小節已刪除，可復原或完成這次編輯' : 'Bar deleted. Undo it or finish this edit.')
                 : (language === 'zh' ? '正在恢復選取位置，請重新點選小節' : 'Restoring the selection. Please tap the bar again.')}
@@ -1487,7 +1487,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
                   </div>
                   <div className="flex h-8 shrink-0 gap-1">
                     <button type="button" className={`${buttonClass} min-h-0 shrink-0 px-2`} onClick={() => { updateFields({ timeSignature: undefined }); setActivePicker(null); }}>{language === 'zh' ? '繼承' : 'Inherit'}</button>
-                    <input className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-center text-xs font-bold outline-none focus:border-indigo-400" inputMode="numeric" value={TIME_SIGNATURES.includes(bar.timeSignature || '') ? '' : bar.timeSignature || ''} onChange={(event) => updateFields({ timeSignature: event.target.value || undefined }, `time:${bar.id}`)} placeholder={language === 'zh' ? '自訂拍號' : 'Custom signature'} aria-label={language === 'zh' ? '自訂拍號' : 'Custom time signature'} />
+                    <input className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-center text-base font-bold outline-none focus:border-indigo-400 sm:text-xs" inputMode="numeric" value={TIME_SIGNATURES.includes(bar.timeSignature || '') ? '' : bar.timeSignature || ''} onChange={(event) => updateFields({ timeSignature: event.target.value || undefined }, `time:${bar.id}`)} placeholder={language === 'zh' ? '自訂拍號' : 'Custom signature'} aria-label={language === 'zh' ? '自訂拍號' : 'Custom time signature'} />
                   </div>
                 </div>
               )}
@@ -1506,7 +1506,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
                 <div data-picker-layout="ending-list" className="flex min-h-0 flex-1 flex-col gap-1">
                   {ENDINGS.map((ending) => <button key={ending} type="button" className={`${buttonClass} min-h-0 flex-1 overflow-hidden px-2 ${bar.ending === ending ? activeButtonClass : ''}`} onClick={() => { updateFields({ ending: bar.ending === ending ? undefined : ending }); setActivePicker(null); }} aria-label={`Ending ${ending}`}><EndingGlyph value={ending} /></button>)}
                   <button type="button" className={`${buttonClass} min-h-0 flex-1 overflow-hidden px-2`} onClick={() => { updateFields({ ending: undefined }); setActivePicker(null); }} aria-label={language === 'zh' ? '清除房子記號' : 'Clear ending'}><EndingGlyph value="" /></button>
-                  <input className="h-8 shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-center text-xs font-bold outline-none focus:border-indigo-400" value={ENDINGS.includes(bar.ending || '') ? '' : bar.ending || ''} onChange={(event) => updateFields({ ending: event.target.value || undefined }, `ending:${bar.id}`)} placeholder={language === 'zh' ? '自訂' : 'Custom'} aria-label={language === 'zh' ? '自訂 Ending' : 'Custom ending'} />
+                  <input className="h-8 shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-center text-base font-bold outline-none focus:border-indigo-400 sm:text-xs" value={ENDINGS.includes(bar.ending || '') ? '' : bar.ending || ''} onChange={(event) => updateFields({ ending: event.target.value || undefined }, `ending:${bar.id}`)} placeholder={language === 'zh' ? '自訂' : 'Custom'} aria-label={language === 'zh' ? '自訂 Ending' : 'Custom ending'} />
                 </div>
               )}
 
@@ -1944,9 +1944,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         {compactLandscapeKeyboard && notationMode==='chords' && <div role="group" aria-label="和弦鍵盤頁面" className="flex gap-1">{(['input','tools'] as const).map(page=><button type="button" key={page} aria-pressed={landscapeChordPage===page} className={toolbarButtonClass} onClick={()=>setLandscapeChordPage(page)}>{page==='input'?'輸入':'功能'}</button>)}</div>}
         {headerAudition && previousBeatButton}
         {!phoneAudition && <div data-keyboard-status className="min-w-0 flex-1">
-          <div className="truncate text-[9px] font-black uppercase tracking-[0.12em] text-indigo-500">{isPickup ? (language === 'zh' ? '弱起拍 · 第 0 小節' : 'Pickup · Bar 0') : section.title || (language === 'zh' ? '未命名段落' : 'Untitled section')}{bassMode && notationMode === 'chords' && <span className="ml-1 normal-case tracking-normal" role="status">{language === 'zh' ? '低音輸入' : 'Bass input'}</span>}</div>
+          <div className="truncate text-[11px] font-semibold text-indigo-600">{isPickup ? (language === 'zh' ? '弱起拍 · 第 0 小節' : 'Pickup · Bar 0') : section.title || (language === 'zh' ? '未命名段落' : 'Untitled section')}{bassMode && notationMode === 'chords' && <span className="ml-1" role="status">{language === 'zh' ? '低音輸入' : 'Bass input'}</span>}</div>
           {headerAudition ? audition
-            : <div className="truncate text-xs font-black text-slate-900">{headerValue}</div>}
+            : <div className="truncate text-xs font-bold text-slate-900">{headerValue}</div>}
         </div>}
         {deviceLayout === 'desktop' && <button type="button" className={toolbarButtonClass} onClick={() => navigateNotation('next')} aria-label="Next beat"><ChevronRight size={16} /></button>}
         {notationMode === 'chords' && <button type="button" className={toolbarButtonClass} aria-label={language === 'zh' ? '拍內和弦與休止' : 'Chords and rests within beats'} aria-pressed={subdivisionsExpanded} onClick={()=>setSubdivisionsExpanded(value=>!value)}>&amp;+</button>}
@@ -2108,8 +2108,8 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           {!isPickup && !voiceTarget && <NotationColorControls label={previewColorLabel} language={language} selected={selectedPreviewColor} disabled={previewColorDisabled} persistent={false} onSelect={applyPreviewColor}/>}
           <button type="button" className="inline-flex min-h-11 flex-1 items-center justify-center rounded-[15px] border border-white/80 bg-white/80 whitespace-nowrap text-xs font-semibold text-indigo-700 sm:text-sm shadow-[0_1px_0_rgba(15,23,42,0.16),0_3px_7px_rgba(15,23,42,0.10)] transition-[transform,box-shadow,background-color] duration-75 active:translate-y-px active:scale-[0.99] active:bg-white active:shadow-none" onClick={() => navigateNotation('previous')} aria-label="Previous beat"><ChevronLeft size={20} className="mr-1 shrink-0" />{previousLabel}</button>
           {!phoneAudition && <div className="flex min-w-14 flex-col items-center justify-center rounded-[15px] border border-white/40 bg-slate-300/70 px-1 text-center shadow-inner">
-            <span className="text-[9px] font-black uppercase text-slate-400">{footerPositionLabel}</span>
-            <span className="text-xs font-black text-slate-800">{footerPositionValue}</span>
+            <span className="text-[10px] font-semibold text-slate-500">{footerPositionLabel}</span>
+            <span className="text-xs font-bold tabular-nums text-slate-800">{footerPositionValue}</span>
           </div>}
           <button type="button" className="inline-flex min-h-11 flex-1 items-center justify-center rounded-[15px] border border-indigo-500/60 bg-indigo-700 whitespace-nowrap text-xs font-semibold text-white sm:text-sm shadow-[0_1px_0_rgba(49,46,129,0.9),0_4px_10px_rgba(79,70,229,0.28)] transition-[transform,box-shadow,background-color] duration-75 active:translate-y-px active:scale-[0.99] active:bg-indigo-700 active:shadow-none" onClick={() => navigateNotation('next')} aria-label="Next beat">{nextLabel}<ChevronRight size={20} className="ml-1 shrink-0" /></button>
           <button type="button" className="inline-flex min-w-10 items-center justify-center rounded-[15px] border border-white/40 bg-slate-300/70 text-slate-600 shadow-[0_1px_3px_rgba(15,23,42,0.10)] transition-[transform,background-color] duration-75 active:translate-y-px active:bg-slate-300" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? (language === 'zh' ? '展開鍵盤' : 'Expand keyboard') : (language === 'zh' ? '收合鍵盤' : 'Collapse keyboard')}>

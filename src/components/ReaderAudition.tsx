@@ -9,6 +9,7 @@ import { getChordEvents } from '../utils/chordSubdivisions';
 import { chordBeatPositionLabel } from '../utils/chordBeatOffsets';
 import { hasUnmeteredChords } from '../utils/unmeteredChords';
 import ChordAuditionControl, { type ChordPlayback } from './preview-edit/ChordAuditionControl';
+import { AnimatedDisclosure } from './ui/InteractionMotion';
 import './preview-edit/PreviewKeyboard.css';
 
 interface Props {
@@ -120,12 +121,12 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
         aria-expanded={open} aria-controls={panelId} aria-label={toggleLabel} onClick={() => open ? close() : setOpen(true)}>
         <Headphones size={16} aria-hidden="true" />{open ? (zh ? '收起' : 'Hide') : toggleLabel}
       </button>, triggerHost)}
-    <div ref={panelRef} id={panelId} tabIndex={-1} hidden={!open || hidePanel} role="region" aria-label={zh ? '和弦試聽' : 'Chord playback'}
-      className="reader-audition" data-keyboard-refined data-preview-only-control
-      onKeyDown={event => { if (event.key === 'Escape' && !event.defaultPrevented) {
-        event.stopPropagation(); close();
-      } }}>
-      {open && <>
+    <AnimatedDisclosure open={open && !hidePanel}>
+      <div ref={panelRef} id={panelId} tabIndex={-1} role="region" aria-label={zh ? '和弦試聽' : 'Chord playback'}
+        className="reader-audition" data-keyboard-refined data-preview-only-control
+        onKeyDown={event => { if (event.key === 'Escape' && !event.defaultPrevented) {
+          event.stopPropagation(); close();
+        } }}>
         <div className="reader-audition-controls">
           <ChordAuditionControl song={song} identity={identity} language={language} selectionLabel=""
             target={{ sectionId: measure.sectionId, sectionOccurrence: measure.sectionOccurrence, barId: measure.barId,
@@ -135,13 +136,13 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
             aria-label={`${changeStart} · ${location}`} title={zh ? `更換起點（也可點譜） · ${location}` : `Change start or tap the score · ${location}`} onClick={() => setChoosingStart(value => !value)}>
             <span className="reader-start-section">{sectionName(measureIndex)}</span>
             <span className="reader-start-bar">{barLabel}{beatDetail && ` · ${beatDetail}`}</span>
-            <ChevronDown size={12} aria-hidden="true" />
+            <ChevronDown size={12} aria-hidden="true" className={`ui-motion-chevron ${choosingStart ? 'rotate-180' : ''}`} />
           </button>}
           <button type="button" className="reader-audition-close" aria-label={zh ? '收起試聽面板' : 'Collapse playback panel'}
             title={toggleLabel} onClick={close}><X size={17} aria-hidden="true" /></button>
         </div>
-        <div className="reader-start-picker" id={pickerId} hidden={!choosingStart || byMap}>
-          {choosingStart && !byMap && <>
+        <AnimatedDisclosure open={choosingStart && !byMap}>
+          <div className="reader-start-picker" id={pickerId}>
             <label>{zh ? '段落' : 'Section'}
               <select name="audition-section" value={measure.sectionIndex}
                 onChange={event => goToMeasure(sectionStarts[event.target.selectedIndex])}>
@@ -164,10 +165,10 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
                 {positions.map((p, i) => <option key={i} value={i}>{p.label}</option>)}
               </select>
             </label>
-          </>}
-        </div>
-      </>}
-      {!byMap && <div ref={setFeedbackHost} />}
-    </div>
+          </div>
+        </AnimatedDisclosure>
+        {!byMap && <div ref={setFeedbackHost} />}
+      </div>
+    </AnimatedDisclosure>
   </>;
 }

@@ -5,8 +5,8 @@
 .tempo-trigger-value{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
 .tempo-trigger-unit{font-size:10px;font-weight:500;color:var(--color-text-muted)}
 .tempo-trigger>svg{flex-shrink:0;color:var(--color-text-muted)}
-.tempo-trigger:focus-visible,.tempo-trigger[aria-expanded=true]{outline:2px solid var(--color-indigo-600);outline-offset:-2px}
-.tempo-panel{width:min(276px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow-y:auto;overscroll-behavior:contain;padding:16px;border-radius:16px;background:var(--color-surface-raised);color:var(--color-text);box-shadow:0 10px 36px #0003}
+.tempo-trigger:focus-visible,.tempo-trigger[aria-expanded=true]{outline:2px solid var(--color-focus-ring);outline-offset:-2px}
+.tempo-panel{width:min(276px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow-y:auto;overscroll-behavior:contain;padding:16px;border:1px solid var(--color-border);border-radius:16px;background:var(--color-surface-raised);color:var(--color-text);box-shadow:0 10px 36px #0003}
 .tempo-panel-heading{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;font-size:16px;font-weight:600}
 .tempo-panel-heading>span{font-size:12px;font-weight:500;color:var(--color-text-muted)}
 .tempo-scope{margin:0 0 16px;font-size:12px;line-height:18px;color:var(--color-text-muted)}
@@ -14,10 +14,10 @@
 .tempo-stepper button{display:flex;align-items:center;justify-content:center;min-height:48px;border-radius:8px;background:var(--color-surface-sunken)}
 .tempo-stepper input{width:100%;min-width:0;height:48px;padding:4px;border:1px solid var(--color-border-strong);border-radius:8px;background:var(--color-surface);color:var(--color-text);text-align:center;font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;caret-color:var(--color-indigo-600)}
 .tempo-stepper input::placeholder{color:var(--color-text-muted)}
-.tempo-panel button:focus-visible,.tempo-panel input:focus-visible{outline:2px solid var(--color-indigo-600);outline-offset:2px}
+.tempo-panel button:focus-visible,.tempo-panel input:focus-visible{outline:2px solid var(--color-focus-ring);outline-offset:2px}
 .tempo-panel button:disabled{opacity:.45;cursor:default}
 .tempo-hint{margin:8px 0 16px;font-size:12px;line-height:18px;color:var(--color-text-muted)}
-.tempo-hint.is-error{color:var(--color-red-600)}
+.tempo-hint.is-error{color:var(--color-danger)}
 .tempo-original{border-top:1px solid var(--color-border);padding-top:12px;margin-top:12px}
 .tempo-original p{font-size:12px;line-height:18px;color:var(--color-text-muted);margin:0 0 8px}
 .tempo-original button{width:100%;min-height:44px;padding:8px 10px;border:1px solid var(--color-border-strong);border-radius:8px;font-size:12px;font-weight:600;line-height:18px;text-align:left;background:var(--color-surface-muted);margin-bottom:8px}

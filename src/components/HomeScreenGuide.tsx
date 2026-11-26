@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ArrowUp, Check, ChevronLeft, Ellipsis, PlusSquare, Share, X } from 'lucide-react';
 import type { AppLanguage } from '../types';
 import ResponsiveDialog from './ResponsiveDialog';
+import SlidingSelection from './ui/SlidingSelection';
+import { useContentSwitchMotion } from '../hooks/useContentSwitchMotion';
 
 export type HomeScreenDevice = 'iphone' | 'ipad';
 interface Props {
@@ -15,7 +17,7 @@ interface Props {
 // guide scales with the device and language without downloading screenshots.
 function InstallIllustration({ device, step, zh }: { device: HomeScreenDevice; step: number; zh: boolean }) {
   const ipad = device === 'ipad';
-  const highlight = 'rounded-lg bg-indigo-600 p-2 text-white ring-4 ring-indigo-100';
+  const highlight = 'rounded-lg bg-indigo-600 p-2 text-white ring-4 ring-indigo-100 dark:ring-indigo-900';
   return <div aria-hidden="true" className="mx-auto w-full max-w-[320px] rounded-2xl border-2 border-slate-300 bg-slate-50 p-2 shadow-sm">
     <div className="flex h-[148px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white text-[11px] text-slate-600">
       {step === 1 ? <>
@@ -43,10 +45,10 @@ function InstallIllustration({ device, step, zh }: { device: HomeScreenDevice; s
           <span className="flex h-5 w-9 shrink-0 justify-end rounded-full bg-emerald-500 p-0.5"><span className="size-4 rounded-full bg-white" /></span>
         </div>
         <span className="self-end rounded-md bg-indigo-600 px-3 py-1 font-bold text-white">{zh ? '加入' : 'Add'}</span>
-      </div> : <div className="flex h-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-indigo-50 to-sky-100">
-        <img src={`${import.meta.env.BASE_URL}icons/icon-192.png`} width="52" height="52" alt="" className="rounded-xl shadow-md ring-4 ring-white" />
+      </div> : <div className="flex h-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-indigo-50 to-sky-100 dark:from-indigo-950 dark:to-sky-950">
+        <img src={`${import.meta.env.BASE_URL}icons/icon-192.png`} width="52" height="52" alt="" className="rounded-xl shadow-md ring-4 ring-white dark:ring-[color:var(--color-border)]" />
         <span className="font-bold text-slate-800">ChordMaster</span>
-        <ArrowUp size={22} className="text-indigo-600" />
+        <ArrowUp size={22} className="text-indigo-600 dark:text-indigo-300" />
       </div>}
     </div>
     <div className={`mx-auto mt-2 h-1 rounded-full bg-slate-400 ${ipad ? 'w-16' : 'w-10'}`} />
@@ -55,6 +57,8 @@ function InstallIllustration({ device, step, zh }: { device: HomeScreenDevice; s
 
 export default function HomeScreenGuide({ language, initialDevice, onClose, onAdded }: Props) {
   const [device, setDevice] = useState(initialDevice);
+  const stepsRef = useRef<HTMLOListElement>(null);
+  useContentSwitchMotion(stepsRef, device, true);
   const zh = language === 'zh';
   const ipad = device === 'ipad';
   const steps = zh ? [
@@ -75,14 +79,16 @@ export default function HomeScreenGuide({ language, initialDevice, onClose, onAd
     subtitle={zh ? '像 App 一樣開啟 ChordMaster' : 'Open ChordMaster like an app'}
     closeLabel={zh ? '關閉加入主畫面引導' : 'Close Home Screen guide'} onClose={onClose}>
     <div data-home-screen-guide className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 pb-[max(20px,env(safe-area-inset-bottom))] text-sm leading-6">
-      <div role="group" aria-label={zh ? '選擇裝置' : 'Choose device'} className="mb-4 flex gap-2 rounded-xl bg-slate-100 p-1">
+      <div role="group" aria-label={zh ? '選擇裝置' : 'Choose device'} className="relative mb-4 flex gap-2 rounded-xl bg-slate-100 p-1">
+        <SlidingSelection index={device === 'ipad' ? 1 : 0} count={2} inset={4} gap={8}
+          className="bg-white shadow-sm dark:bg-[color:var(--color-surface-raised)]" style={{ borderRadius: 8 }} />
         {(['iphone', 'ipad'] as const).map(value => <button key={value} type="button" aria-pressed={device === value}
-          onClick={() => setDevice(value)} className={`min-h-11 flex-1 rounded-lg px-4 font-bold ${device === value ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600'}`}>
+          onClick={() => setDevice(value)} className={`relative min-h-11 flex-1 rounded-lg px-4 font-bold transition-colors ${device === value ? 'text-indigo-700' : 'text-slate-600 hover:text-slate-900'}`}>
           {value === 'iphone' ? 'iPhone' : 'iPad'}
         </button>)}
       </div>
       <p className="text-gray-600">{zh ? '請在裝置的 Safari 中操作。以下為示意圖；工具列位置可能隨系統版本與設定不同。' : 'Follow these steps in Safari on your device. These diagrams are illustrative; toolbar positions vary by system version and settings.'}</p>
-      <ol className="mt-5 space-y-6">
+      <ol ref={stepsRef} className="mt-5 space-y-6">
         {steps.map((step, index) => <li key={index} className="space-y-3">
           <h3 className="flex items-center gap-2 font-bold text-slate-900"><span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs text-indigo-700">{index + 1}</span>{step.title}</h3>
           <p className="text-gray-600">{step.text}</p>
@@ -92,8 +98,8 @@ export default function HomeScreenGuide({ language, initialDevice, onClose, onAd
       <p className="mt-5 text-xs text-gray-500">{zh ? '時間、電量與底部手勢區域仍由系統管理。' : 'The system still controls the clock, battery indicators, and home gesture area.'}</p>
       <a href={`https://support.apple.com/${zh ? 'zh-tw' : 'en-us'}/guide/${ipad ? 'ipad/ipad8f1f7a29/ipados' : 'iphone/iphea86e5236/ios'}`} target="_blank" rel="noreferrer" className="mt-3 inline-block min-h-11 py-2 font-semibold text-indigo-700 underline underline-offset-4">{zh ? 'Apple 官方操作說明' : 'Apple’s official instructions'}</a>
       <div className="mt-4 flex flex-col gap-2 border-t border-slate-200 pt-4">
-        <button type="button" onClick={onAdded} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 font-bold text-white"><Check size={18} />{zh ? '我已加入，不再顯示' : 'Already added — don’t show again'}</button>
-        <button type="button" onClick={onClose} className="flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2 font-semibold text-slate-600"><X size={16} />{zh ? '稍後再說' : 'Maybe later'}</button>
+        <button type="button" onClick={onAdded} className="ui-press flex min-h-11 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 font-bold text-white transition-colors hover:bg-indigo-700"><Check size={18} />{zh ? '我已加入，不再顯示' : 'Already added — don’t show again'}</button>
+        <button type="button" onClick={onClose} className="ui-press flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2 font-semibold text-slate-600 transition-colors hover:bg-slate-100"><X size={16} />{zh ? '稍後再說' : 'Maybe later'}</button>
       </div>
     </div>
   </ResponsiveDialog>;

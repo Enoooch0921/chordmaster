@@ -17,8 +17,11 @@
 .invitation-meta { margin: 10px 0 0; font-size: 13px; }
 .invitation-description { margin: 18px 0 0; color: var(--color-text-muted, #4b5563); font-size: 15px; line-height: 1.7; }
 .invitation-action { margin-top: 24px; }
-.invitation-primary { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 50px; padding: 12px 16px; border: 0; border-radius: 12px; background: #236e48; color: #fff; font-size: 14px !important; font-weight: 600 !important; cursor: pointer; transition: background-color 150ms ease-out; }
+.invitation-primary { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 50px; padding: 12px 16px; border: 0; border-radius: 12px; background: #236e48; color: #fff; font-size: 14px !important; font-weight: 600 !important; cursor: pointer; transition: background-color 150ms ease-out, transform 140ms ease-out; }
 .invitation-primary:hover { background: #1a5234; }
+@media (prefers-reduced-motion: no-preference) {
+  .invitation-primary:active:not(:disabled) { transform: scale(0.985); }
+}
 .invitation-primary:disabled { opacity: .65; cursor: wait; }
 .invitation-primary svg { flex-shrink: 0; }
 .invitation-helper { margin: 10px 0 0; text-align: center; font-size: 12px; color: var(--color-text-muted, #4b5563); }
@@ -38,7 +41,10 @@
 .invitation-project-list summary::-webkit-details-marker, .invitation-details summary::-webkit-details-marker { display: none; }
 .invitation-project-list summary span { flex: 1; overflow-wrap: anywhere; }
 .invitation-project-list summary small { color: var(--color-text-muted, #4b5563); font-size: 12px; white-space: nowrap; }
-.invitation-project-list summary svg, .invitation-details summary svg { flex-shrink: 0; }
+.invitation-project-list summary svg, .invitation-details summary svg { flex-shrink: 0; transition: transform var(--ui-release-duration, 160ms) var(--ease-ui-out, ease-out); }
+@media (prefers-reduced-motion: reduce) {
+  .invitation-project-list summary svg, .invitation-details summary svg { transition: none; }
+}
 .invitation-project-list[open] > summary svg, .invitation-details[open] > summary svg { transform: rotate(180deg); }
 .invitation-details { margin-top: 22px; border-top: 1px solid var(--color-border); }
 .invitation-details summary { justify-content: space-between; font-size: 12px; color: var(--color-text-muted, #4b5563); }
@@ -66,6 +72,9 @@
 .invitation-gate--quiet button { color: var(--color-text); border-color: var(--color-border); }
 .dark .invitation-meta, .dark .invitation-account, .dark .invitation-brand svg { color: #8ad0ac; }
 .dark .invitation-error, .dark .invitation-sync--failed { color: #fca5a5; }
+@media (max-width: 600px) {
+  .invitation-language select { font-size: 16px; }
+}
 @media (max-width: 520px) {
   .invitation-page { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background: var(--color-surface); }
   .invitation-sheet { border: 0; border-radius: 0; min-height: 100dvh; }

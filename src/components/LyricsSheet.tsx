@@ -234,7 +234,7 @@ export default function LyricsSheet({ song, setlistSongNumber, language, onChang
   const readingPages: LyricsPage[] = [{ columns: [visibleBlocks.map(block => ({ blockId: block.id, start: 0, end: Math.max(block.chinese.split('\n').length, block.english.split('\n').length), continued: false }))] }];
 
   return <div className="lyrics-sheet flex flex-col gap-6 text-stone-900" data-preview-suppress-pan="true" style={{ fontFamily: LYRICS_BOOK_FONT }}>
-    {!exportMode && <div data-preview-only-control className="z-20 space-y-3 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm" style={{ fontFamily: 'Arial, sans-serif' }}>
+    {!exportMode && <div data-preview-only-control className="z-20 space-y-3 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm" style={{ fontFamily: 'var(--font-sans)' }}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="mr-auto text-sm font-semibold">{zh ? '歌詞' : 'Lyrics'}</span>
         {!hideViewToggle && <button type="button" className={buttonClass} aria-pressed={reading} onClick={() => {

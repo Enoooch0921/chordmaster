@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useIsPresent, useMotionValue, type HTMLMotionProps } from 'motion/react';
-import { type HTMLAttributes, type ReactNode, type Ref } from 'react';
+import { useEffect, useState, type HTMLAttributes, type ReactNode, type Ref } from 'react';
 import { useKeyboardMotionInterrupt, useUiMotion } from '../../hooks/useUiMotion';
 import { popoverVariants, UI_EASE_OUT, type UiMotionPreference } from '../../lib/uiMotion';
 
@@ -40,10 +40,10 @@ function PopoverBody({ panelRef, shellClassName, className, children, style, ori
 const disclosureVariants = {
   hidden: { opacity: 0 },
   visible: (preference: UiMotionPreference) => ({ opacity: 1, transition: {
-    duration: preference.instant ? 0 : 0.125, ease: UI_EASE_OUT
+    duration: preference.instant ? 0 : preference.reduced ? 0.125 : 0.18, ease: UI_EASE_OUT
   } }),
   exit: (preference: UiMotionPreference) => ({ opacity: 0, transition: {
-    duration: preference.instant ? 0 : 0.125, ease: UI_EASE_OUT
+    duration: preference.instant ? 0 : preference.reduced ? 0.125 : 0.15, ease: UI_EASE_OUT
   } })
 };
 export function AnimatedDisclosure({ open, children, className, id, resize = false }: { open: boolean; children: ReactNode; className?: string; id?: string; resize?: boolean }) {
@@ -52,15 +52,27 @@ export function AnimatedDisclosure({ open, children, className, id, resize = fal
     {open && <DisclosureBody key="disclosure" preference={preference} className={className} id={id} resize={resize}>{children}</DisclosureBody>}
   </AnimatePresence>;
 }
-/** Keep final geometry during a short fade, then remove it in one layout change. */
+/** Smoothly expand/collapse via CSS grid rows without touching inline height or ResizeObserver. */
 function DisclosureBody({ preference, children, className, id, resize }: { preference: UiMotionPreference; children: ReactNode; className?: string; id?: string; resize: boolean }) {
   const present = useIsPresent();
   const opacity = useMotionValue(1);
-  useKeyboardMotionInterrupt(() => opacity.animation?.complete());
-  return <motion.div id={id} data-ui-disclosure inert={!present ? true : undefined} aria-hidden={!present ? true : undefined}
-    custom={preference} variants={disclosureVariants} initial={resize ? false : 'hidden'}
+  const expand = !resize && !preference.instant && !preference.reduced;
+  const [entered, setEntered] = useState(!expand);
+  useEffect(() => {
+    if (!expand || entered) return;
+    const frame = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(frame);
+  }, [expand, entered]);
+  useKeyboardMotionInterrupt(() => {
+    setEntered(true);
+    opacity.animation?.complete();
+  });
+  const disclosureState = !present ? 'exiting' : entered ? 'open' : 'entering';
+  return <motion.div id={id} data-ui-disclosure data-disclosure-expand={expand ? 'true' : undefined} data-disclosure-state={expand ? disclosureState : undefined}
+    inert={!present ? true : undefined} aria-hidden={!present ? true : undefined}
+    custom={preference} variants={disclosureVariants} initial={resize || preference.instant ? false : 'hidden'}
     animate="visible" exit="exit" style={{ overflow: 'hidden', opacity }}>
-    <div className={className}>{children}</div>
+    {resize ? <div className={className}>{children}</div> : <div className="ui-disclosure-clip"><div className={className}>{children}</div></div>}
   </motion.div>;
 }
 

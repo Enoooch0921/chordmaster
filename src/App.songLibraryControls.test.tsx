@@ -163,8 +163,11 @@ it('shares the same complete cross-search selection as archive, with inspect/rem
   fireEvent.click(screen.getByRole('button', { name: '已選 2 首' }));
   const selection = within(screen.getByRole('region', { name: '已選歌曲' }));
   expect(selection.getByText('第一首歌曲')).toBeInTheDocument(); expect(selection.getByText('第二首歌曲')).toBeInTheDocument();
-  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
-  try { fireEvent.click(screen.getByRole('button', { name: '刪除所選（可還原） (2)' })); expect(confirm).toHaveBeenCalledWith('要封存選取的 2 首歌曲嗎？'); } finally { confirm.mockRestore(); }
+  fireEvent.click(screen.getByRole('button', { name: '刪除所選（可還原） (2)' }));
+  const archiveDialog = await screen.findByRole('alertdialog');
+  expect(archiveDialog).toHaveTextContent('要封存選取的 2 首歌曲嗎？');
+  fireEvent.click(within(archiveDialog).getByRole('button', { name: '取消' }));
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
   fireEvent.click(selection.getByRole('button', { name: '取消選取：第一首歌曲' }));
   expect(screen.getByRole('button', { name: '分享 (1)' })).toBeEnabled();
   fireEvent.click(screen.getByRole('button', { name: '清除全部選取' }));
@@ -183,11 +186,11 @@ it('only deduplicates the selected songs, even when an unselected identical copy
   fireEvent.click(screen.getByRole('button', { name: '歌曲庫操作' }));
   fireEvent.click(await screen.findByRole('menuitem', { name: '管理歌曲' }));
   fireEvent.click(within(row('first')).getByRole('checkbox')); fireEvent.click(within(row('second')).getByRole('checkbox'));
-  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
-  try {
-    fireEvent.click(screen.getByRole('button', { name: '封存所選重複歌曲' }));
-    expect(confirm).toHaveBeenCalledWith('要封存已選 2 首中的 1 首相同副本嗎？既有歌單保留原本引用，可用撤銷恢復。');
-  } finally { confirm.mockRestore(); }
+  fireEvent.click(screen.getByRole('button', { name: '封存所選重複歌曲' }));
+  const dedupeDialog = await screen.findByRole('alertdialog');
+  expect(dedupeDialog).toHaveTextContent('要封存已選 2 首中的 1 首相同副本嗎？既有歌單保留原本引用，可用撤銷恢復。');
+  fireEvent.click(within(dedupeDialog).getByRole('button', { name: '取消' }));
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
 });
 
 it('duplicates a library song into preview editing without opening the retired left editor', async () => {
@@ -369,12 +372,11 @@ it('long-presses into selection without native selection and exposes recoverable
     expect(within(row('first')).getByRole('checkbox')).not.toBeChecked();
     expect(within(row('second')).getByRole('textbox', { name: '歌曲名稱：第二首歌曲' })).toBeEnabled();
     const deletion = screen.getByRole('button', { name: '刪除所選（可還原） (1)' });
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    try {
-      fireEvent.click(deletion);
-      expect(confirm).toHaveBeenCalledWith('要封存選取的 1 首歌曲嗎？');
-      expect(within(row('second')).getByRole('checkbox')).toBeChecked();
-    } finally { confirm.mockRestore(); }
+    fireEvent.click(deletion);
+    const deleteDialog = screen.getByRole('alertdialog');
+    expect(deleteDialog).toHaveTextContent('要封存選取的 1 首歌曲嗎？');
+    fireEvent.click(within(deleteDialog).getByRole('button', { name: '取消' }));
+    expect(within(row('second')).getByRole('checkbox')).toBeChecked();
   } finally { vi.useRealTimers(); window.getSelection()!.removeAllRanges(); }
 });
 

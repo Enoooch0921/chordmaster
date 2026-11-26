@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent, type TouchEvent } from 'react';
-import { ArrowLeft, ArrowRight, Copy, Minus, Pencil, Plus, Trash2, Undo2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ChevronDown, Copy, Minus, Pencil, Plus, Trash2, Undo2 } from 'lucide-react';
 import type { AppLanguage, SongMapStep } from '../types';
 import { expandSongMapSectionLabel, songMapDisplayParts, songMapLabel, songMapSuggestions } from '../lib/songMap';
 import ResponsiveDialog from './ResponsiveDialog';
@@ -290,7 +290,7 @@ export default function SongMapEditor({ steps, options, language, title, close }
         </button>)}
       </div>
       <div className="map-extra-actions">
-        <details className="map-custom-section"><summary>{zh ? '其他／自訂段落' : 'Other / custom section'}</summary>
+        <details className="ui-details map-custom-section"><summary>{zh ? '其他／自訂段落' : 'Other / custom section'}<ChevronDown size={14} className="ui-motion-chevron" aria-hidden="true" /></summary>
           <form onSubmit={e => { e.preventDefault(); add(custom); setCustom(''); }}>
             <input list={listId} aria-label={zh ? '自訂段落名稱' : 'Custom section name'} value={custom} onChange={e => setCustom(e.target.value)} placeholder={zh ? '選擇或輸入段落名稱' : 'Choose or enter a section'} />
             <button type="submit" disabled={!custom.trim()}><Plus size={17}/>{zh ? '加入' : 'Add'}</button>

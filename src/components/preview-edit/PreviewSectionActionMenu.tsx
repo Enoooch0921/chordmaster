@@ -1,8 +1,12 @@
 import React from 'react';
+import { useIsPresent } from 'motion/react';
 import { Copy, CornerUpLeft, ListStart, Pencil, Trash2, X } from 'lucide-react';
 import type { AppLanguage } from '../../types';
 import type { PreviewAnchorRect } from '../ChordSheet';
 import type { PreviewEditorDeviceLayout } from '../../lib/previewEditorLayout';
+import { useUiMotion } from '../../hooks/useUiMotion';
+import { backdropVariants, drawerVariants, popoverVariants } from '../../lib/uiMotion';
+import { PresenceSurface } from '../ui/InteractionMotion';
 
 interface PreviewSectionActionMenuProps {
   language: AppLanguage;
@@ -33,20 +37,24 @@ const PreviewSectionActionMenu: React.FC<PreviewSectionActionMenuProps> = ({
   onDelete,
   onClose
 }) => {
+  const present = useIsPresent();
+  const uiMotion = useUiMotion();
   const panelRef = React.useRef<HTMLDivElement>(null);
   const isTouchLayout = deviceLayout !== 'desktop';
 
   React.useEffect(() => {
+    if (!present) return;
     panelRef.current?.querySelector<HTMLButtonElement>('button[data-primary-action]')?.focus({ preventScroll: true });
-  }, []);
+  }, [present]);
 
   React.useEffect(() => {
+    if (!present) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [onClose, present]);
 
   const actions = (
     <div className={isTouchLayout ? 'grid gap-2' : 'grid gap-1'}>
@@ -54,7 +62,7 @@ const PreviewSectionActionMenu: React.FC<PreviewSectionActionMenuProps> = ({
         type="button"
         data-primary-action
         onClick={onRename}
-        className={`${isTouchLayout ? 'min-h-12 px-4 text-sm' : 'min-h-11 px-3 text-sm'} flex w-full items-center gap-3 rounded-md text-left font-medium text-slate-700 transition-colors hover:bg-indigo-50 hover:text-indigo-800`}
+        className={`ui-press ${isTouchLayout ? 'min-h-12 px-4 text-sm' : 'min-h-11 px-3 text-sm'} flex w-full items-center gap-3 rounded-md text-left font-medium text-slate-700 transition-colors hover:bg-indigo-50 hover:text-indigo-800`}
       >
         <Pencil size={17} />
         <span>{language === 'zh' ? '重新命名' : 'Rename'}</span>
@@ -62,7 +70,7 @@ const PreviewSectionActionMenu: React.FC<PreviewSectionActionMenuProps> = ({
       <button
         type="button"
         onClick={onInsertBefore}
-        className={`${isTouchLayout ? 'min-h-12 px-4 text-sm' : 'min-h-11 px-3 text-sm'} flex w-full items-center gap-3 rounded-md text-left font-medium text-slate-700 transition-colors hover:bg-indigo-50 hover:text-indigo-800`}
+        className={`ui-press ${isTouchLayout ? 'min-h-12 px-4 text-sm' : 'min-h-11 px-3 text-sm'} flex w-full items-center gap-3 rounded-md text-left font-medium text-slate-700 transition-colors hover:bg-indigo-50 hover:text-indigo-800`}
       >
         <ListStart size={17} />
         <span>{language === 'zh' ? '在前面插入段落' : 'Insert section before'}</span>
@@ -70,55 +78,69 @@ const PreviewSectionActionMenu: React.FC<PreviewSectionActionMenuProps> = ({
       <button
         type="button"
         onClick={onDuplicate}
-        className={`${isTouchLayout ? 'min-h-12 px-4 text-sm' : 'min-h-11 px-3 text-sm'} flex w-full items-center gap-3 rounded-md text-left font-medium text-slate-700 transition-colors hover:bg-indigo-50 hover:text-indigo-800`}
+        className={`ui-press ${isTouchLayout ? 'min-h-12 px-4 text-sm' : 'min-h-11 px-3 text-sm'} flex w-full items-center gap-3 rounded-md text-left font-medium text-slate-700 transition-colors hover:bg-indigo-50 hover:text-indigo-800`}
       >
         <Copy size={17} />
-        <span>{language === 'zh' ? '複製到後方' : 'Duplicate After'}</span>
+        <span>{language === 'zh' ? '複製到後方' : 'Duplicate after'}</span>
       </button>
       <button
         type="button"
         onClick={onMergePrevious}
         disabled={!canMergePrevious}
-        className={`${isTouchLayout ? 'min-h-12 px-4 text-sm' : 'min-h-11 px-3 text-sm'} flex w-full items-center gap-3 rounded-md text-left font-medium text-slate-700 transition-colors hover:bg-indigo-50 hover:text-indigo-800 disabled:cursor-not-allowed disabled:opacity-35`}
+        className={`ui-press ${isTouchLayout ? 'min-h-12 px-4 text-sm' : 'min-h-11 px-3 text-sm'} flex w-full items-center gap-3 rounded-md text-left font-medium text-slate-700 transition-colors hover:bg-indigo-50 hover:text-indigo-800 disabled:cursor-not-allowed disabled:opacity-35`}
       >
         <CornerUpLeft size={17} />
-        <span>{language === 'zh' ? '合併到前方' : 'Merge Into Previous'}</span>
+        <span>{language === 'zh' ? '合併到前方' : 'Merge into previous'}</span>
       </button>
+      <div role="separator" className="my-1 border-t border-[var(--color-border)]" />
       <button
         type="button"
         onClick={onDelete}
         disabled={!canDelete}
-        className={`${isTouchLayout ? 'min-h-12 px-4 text-sm' : 'min-h-11 px-3 text-sm'} flex w-full items-center gap-3 rounded-md text-left font-medium text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-35`}
+        className={`ui-press ${isTouchLayout ? 'min-h-12 px-4 text-sm' : 'min-h-11 px-3 text-sm'} flex w-full items-center gap-3 rounded-md text-left font-medium text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-35`}
       >
         <Trash2 size={17} />
-        <span>{language === 'zh' ? '刪除段落' : 'Delete Section'}</span>
+        <span>{language === 'zh' ? '刪除段落' : 'Delete section'}</span>
       </button>
     </div>
   );
 
   if (isTouchLayout) {
     return (
-      <div
+      <PresenceSurface
         data-preview-section-action-menu
-        className="fixed inset-0 z-[5300] flex items-end bg-slate-950/35 px-3 pb-[max(12px,env(safe-area-inset-bottom))] backdrop-blur-[1px]"
+        custom={uiMotion}
+        variants={backdropVariants}
+        initial={uiMotion.instant ? false : 'hidden'}
+        animate="visible"
+        exit="exit"
+        className="fixed inset-0 z-[5300] flex items-end bg-slate-950/38 px-3 pb-[max(12px,env(safe-area-inset-bottom))]"
         onPointerDown={(event) => {
-          if (event.target === event.currentTarget) onClose();
+          if (present && event.target === event.currentTarget) onClose();
         }}
       >
-        <div ref={panelRef} className="max-h-[calc(100dvh-24px)] w-full overflow-y-auto overscroll-contain rounded-2xl bg-[var(--color-surface)] p-3 shadow-[0_22px_55px_rgba(15,23,42,0.28)]">
+        <PresenceSurface
+          ref={panelRef}
+          custom={uiMotion}
+          variants={drawerVariants}
+          initial={uiMotion.instant ? false : 'hidden'}
+          animate="visible"
+          exit="exit"
+          className="max-h-[calc(100dvh-24px)] w-full overflow-y-auto overscroll-contain rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-[0_22px_55px_rgba(15,23,42,0.28)]"
+        >
           <div className="mb-2 flex items-center justify-between gap-3 px-2 py-1">
             <div className="min-w-0" aria-label={language === 'zh' ? '段落操作' : 'Section actions'}>
-              <div className="mt-1 truncate text-base font-black text-slate-900">
+              <div className="mt-1 truncate text-base font-bold text-slate-900">
                 {title.trim() || (language === 'zh' ? '未命名段落' : 'Untitled section')}
               </div>
             </div>
-            <button type="button" onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500" aria-label={language === 'zh' ? '關閉段落操作' : 'Close section actions'}>
+            <button type="button" onClick={onClose} className="ui-press flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500" aria-label={language === 'zh' ? '關閉段落操作' : 'Close section actions'}>
               <X size={18} />
             </button>
           </div>
           {actions}
-        </div>
-      </div>
+        </PresenceSurface>
+      </PresenceSurface>
     );
   }
 
@@ -137,23 +159,30 @@ const PreviewSectionActionMenu: React.FC<PreviewSectionActionMenuProps> = ({
 
   return (
     <>
-      <button
-        type="button"
-        className="fixed inset-0 z-[5290] cursor-default bg-transparent"
-        onClick={onClose}
-        aria-label={language === 'zh' ? '關閉段落操作' : 'Close section actions'}
-      />
-      <div
+      {present && (
+        <button
+          type="button"
+          className="fixed inset-0 z-[5290] cursor-default bg-transparent"
+          onClick={onClose}
+          aria-label={language === 'zh' ? '關閉段落操作' : 'Close section actions'}
+        />
+      )}
+      <PresenceSurface
         ref={panelRef}
         data-preview-section-action-menu
-        className="fixed z-[5300] w-[256px] max-w-[calc(100vw-24px)] overflow-y-auto overscroll-contain rounded-xl bg-[var(--color-surface)] p-2 shadow-[0_18px_42px_rgba(15,23,42,0.24)]"
-        style={{ left, top, maxHeight: `calc(100dvh - ${top + margin}px)` }}
+        custom={uiMotion}
+        variants={popoverVariants}
+        initial={uiMotion.instant ? false : 'hidden'}
+        animate="visible"
+        exit="exit"
+        className="fixed z-[5300] w-[256px] max-w-[calc(100vw-24px)] overflow-y-auto overscroll-contain rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2 shadow-[0_18px_42px_rgba(15,23,42,0.24)]"
+        style={{ left, top, maxHeight: `calc(100dvh - ${top + margin}px)`, transformOrigin: opensAbove ? '0% 100%' : '0% 0%' }}
       >
-        <div className="truncate px-3 pb-2 pt-1 text-xs font-black text-slate-900">
+        <div className="truncate px-3 pb-2 pt-1 text-xs font-bold text-slate-900">
           {title.trim() || (language === 'zh' ? '未命名段落' : 'Untitled section')}
         </div>
         {actions}
-      </div>
+      </PresenceSurface>
     </>
   );
 };

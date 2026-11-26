@@ -123,7 +123,7 @@ export default function TeamInvitePage() {
           {language === 'zh' ? '請先登入受邀的 Google 帳號，再確認是否加入團隊。' : 'Sign in with the invited Google account, then confirm whether you want to join.'}
         </p>
         {errorMessage ? <InviteError message={errorMessage} /> : null}
-        <button type="button" onClick={() => void handleSignIn()} disabled={isStartingSignIn} className="mt-6 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-bold text-white transition-colors hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-60">
+        <button type="button" onClick={() => void handleSignIn()} disabled={isStartingSignIn} className="ui-press mt-6 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:cursor-wait disabled:opacity-60">
           {isStartingSignIn ? <LoaderCircle size={17} className="animate-spin" /> : null}
           {language === 'zh' ? '登入後確認邀請' : 'Sign in to review'}
         </button>
@@ -136,7 +136,7 @@ export default function TeamInvitePage() {
       {invite ? (
         <>
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-700"><Users size={23} /></div>
-          <div className="mt-5 text-xs font-bold uppercase tracking-[0.16em] text-indigo-700">{language === 'zh' ? '邀請你加入' : 'You are invited to'}</div>
+          <div className="mt-5 text-xs font-semibold text-indigo-700">{language === 'zh' ? '邀請你加入' : 'You are invited to'}</div>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-stone-900">{invite.libraryName}</h1>
           <p className="mt-2 text-sm leading-6 text-stone-600">
             {language === 'zh' ? `${invite.inviterName || invite.inviterEmail} 邀請你加入這個團隊。` : `${invite.inviterName || invite.inviterEmail} invited you to join this team.`}
@@ -147,10 +147,10 @@ export default function TeamInvitePage() {
           </div>
           {errorMessage ? <InviteError message={errorMessage} /> : null}
           <div className="mt-6 grid grid-cols-[auto_1fr] gap-2">
-            <button type="button" onClick={() => navigate('/', { replace: true })} disabled={isAccepting} className="h-11 rounded-xl border border-stone-200 bg-white px-4 text-sm font-bold text-stone-600 disabled:opacity-50">
+            <button type="button" onClick={() => navigate('/', { replace: true })} disabled={isAccepting} className="ui-press h-11 rounded-xl border border-stone-200 bg-white px-4 text-sm font-bold text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50">
               {language === 'zh' ? '稍後再說' : 'Not now'}
             </button>
-            <button type="button" onClick={() => void handleAccept()} disabled={isAccepting} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-bold text-white transition-colors hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-60">
+            <button type="button" onClick={() => void handleAccept()} disabled={isAccepting} className="ui-press inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:cursor-wait disabled:opacity-60">
               {isAccepting ? <LoaderCircle size={17} className="animate-spin" /> : <Check size={17} />}
               {language === 'zh' ? '確認加入團隊' : 'Confirm and join'}
             </button>

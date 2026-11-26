@@ -37,12 +37,12 @@ export default function PdfShareDialog({ file, language, standalone, onClose }: 
       <p dir="auto" className="mt-1 text-sm text-gray-600 [overflow-wrap:anywhere]">{file.name}</p>
     </header>
     <a ref={attachDownload} download={file.name}
-      className={`mt-5 flex min-h-11 items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 font-semibold text-white hover:bg-gray-800 active:bg-gray-700 ${focus}`}>
+      className={`ui-press mt-5 flex min-h-11 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 font-semibold text-white transition-colors hover:bg-indigo-700 active:bg-indigo-800 ${focus}`}>
       <Download aria-hidden="true" size={18} />{zh ? '開啟或下載 PDF' : 'Open or download PDF'}
     </a>
     <p className="mt-3 text-sm leading-5 text-gray-600">{fileHint}</p>
     <button type="button" aria-label={zh ? '關閉' : 'Close'} onClick={onClose}
-      className={`absolute end-4 top-4 flex size-11 items-center justify-center rounded-full hover:bg-gray-100 ${focus}`}>
+      className={`ui-press absolute end-4 top-4 flex size-11 items-center justify-center rounded-full text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 ${focus}`}>
       <X aria-hidden="true" size={20} />
     </button>
   </AnimatedNativeDialog>;

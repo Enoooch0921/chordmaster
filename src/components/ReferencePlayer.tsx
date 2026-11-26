@@ -1,10 +1,14 @@
 import React from 'react';
-import { ExternalLink, Music2, Mic2, Pause, Play, RotateCcw, RotateCw, X } from 'lucide-react';
+import { ExternalLink, Lightbulb, Music2, Mic2, Pause, Play, RotateCcw, RotateCw, X } from 'lucide-react';
 import { AppLanguage, Key, Song, SongReferenceKind } from '../types';
 import { getTransposeOffset } from '../utils/musicUtils';
 import { getYouTubeEmbedUrl, parseYouTubeVideoId } from '../utils/referenceUtils';
 import { getSongTempoPoints } from '../utils/tempoEvents';
 import { currentKeyMode, formatKeyName } from '../utils/keyMode';
+import { useUiMotion } from '../hooks/useUiMotion';
+import { drawerVariants } from '../lib/uiMotion';
+import { PresenceSurface } from './ui/InteractionMotion';
+import SlidingSelection from './ui/SlidingSelection';
 
 interface ReferencePlayerProps {
   song: Song;
@@ -48,6 +52,7 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
   onKindChange,
   onClose
 }) => {
+  const uiMotion = useUiMotion();
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const currentTimeRef = React.useRef(0);
   const lastTickRef = React.useRef<number | null>(null);
@@ -192,7 +197,14 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
   const referenceLabel = language === 'zh' ? '參考音源' : 'Reference';
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-[210] border-t border-gray-200 bg-white/95 shadow-lg backdrop-blur-md">
+    <PresenceSurface
+      custom={uiMotion}
+      variants={drawerVariants}
+      initial={uiMotion.instant ? false : 'hidden'}
+      animate="visible"
+      exit="exit"
+      className="fixed inset-x-0 bottom-0 z-[210] border-t border-gray-200 bg-white shadow-[0_-12px_36px_rgba(15,23,42,0.14)] dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]"
+    >
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:px-4">
         <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-gray-200 bg-gray-900 shadow-sm sm:w-60">
           {!isFrameLoaded && !isFrameTimedOut && (
@@ -245,7 +257,7 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">
+              <div className="flex items-center gap-2 text-[11px] font-semibold text-gray-500">
                 {activeKind === 'band' ? <Music2 size={13} /> : <Mic2 size={13} />}
                 <span>{referenceLabel}</span>
               </div>
@@ -255,16 +267,29 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
-              <div className="flex items-center gap-1 rounded-xl border border-gray-200 bg-white p-1 shadow-sm">
+              <div className="relative flex items-center gap-1 rounded-xl border border-gray-200 bg-white p-1 shadow-sm">
+                {availableReferenceKinds.length > 1 && (
+                  <SlidingSelection
+                    index={Math.max(0, availableReferenceKinds.indexOf(activeKind))}
+                    count={availableReferenceKinds.length}
+                    inset={4}
+                    gap={4}
+                    className="border border-indigo-200 bg-indigo-50 dark:border-indigo-800 dark:bg-indigo-950"
+                    style={{ borderRadius: 8 }}
+                  />
+                )}
                 {availableReferenceKinds.map((kind) => (
                   <button
                     key={kind}
                     type="button"
+                    aria-pressed={kind === activeKind}
                     onClick={() => onKindChange(kind)}
-                    className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-bold transition-colors ${
+                    className={`relative inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-bold transition-colors ${
                       kind === activeKind
-                        ? 'border border-indigo-200 bg-indigo-50 text-indigo-700'
-                        : 'border border-transparent text-gray-600 hover:bg-gray-50 hover:text-indigo-700'
+                        ? availableReferenceKinds.length > 1
+                          ? 'text-indigo-700'
+                          : 'border border-indigo-200 bg-indigo-50 text-indigo-700'
+                        : 'text-gray-600 hover:text-indigo-700'
                     }`}
                   >
                     {kind === 'band' ? <Music2 size={13} /> : <Mic2 size={13} />}
@@ -276,7 +301,7 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition-colors hover:border-gray-300 hover:bg-gray-50"
+                className="ui-press inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition-colors hover:border-gray-300 hover:bg-gray-50"
                 aria-label={language === 'zh' ? '關閉 Reference' : 'Close Reference'}
               >
                 <X size={16} />
@@ -292,7 +317,7 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
                     key={seconds}
                     type="button"
                     onClick={() => handleSeekBy(seconds)}
-                    className="inline-flex h-9 min-w-12 items-center justify-center gap-1 rounded-lg px-2 text-xs font-bold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
+                    className="ui-press inline-flex h-9 min-w-12 items-center justify-center gap-1 rounded-lg px-2 text-xs font-bold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
                     title={language === 'zh' ? `倒退 ${Math.abs(seconds)} 秒` : `Back ${Math.abs(seconds)} seconds`}
                   >
                     <RotateCcw size={13} />
@@ -304,7 +329,7 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
               <button
                 type="button"
                 onClick={handleTogglePlayback}
-                className="inline-flex h-10 w-12 items-center justify-center rounded-lg bg-gray-900 text-white shadow-sm transition-colors hover:bg-gray-800"
+                className="ui-press inline-flex h-10 w-12 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm transition-colors hover:bg-indigo-700"
                 aria-label={language === 'zh' ? isPlaying ? '暫停' : '播放' : isPlaying ? 'Pause' : 'Play'}
                 title={language === 'zh' ? isPlaying ? '暫停' : '播放' : isPlaying ? 'Pause' : 'Play'}
               >
@@ -317,7 +342,7 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
                     key={seconds}
                     type="button"
                     onClick={() => handleSeekBy(seconds)}
-                    className="inline-flex h-9 min-w-12 items-center justify-center gap-1 rounded-lg px-2 text-xs font-bold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
+                    className="ui-press inline-flex h-9 min-w-12 items-center justify-center gap-1 rounded-lg px-2 text-xs font-bold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
                     title={language === 'zh' ? `前進 ${seconds} 秒` : `Forward ${seconds} seconds`}
                   >
                     <span>{seconds}s</span>
@@ -355,7 +380,7 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
                   onClick={handleResetPracticeBpm}
                   className={`h-7 rounded-md px-2 text-[11px] font-bold transition-colors ${
                     Math.abs(playbackRate - 1) < 0.01
-                      ? 'bg-gray-900 text-white shadow-sm'
+                      ? 'bg-indigo-600 text-white shadow-sm'
                       : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   }`}
                   title={language === 'zh' ? '回到原 BPM' : 'Reset to original BPM'}
@@ -367,7 +392,7 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
                     key={delta}
                     type="button"
                     onClick={() => handlePracticeBpmChange(delta)}
-                    className="h-7 rounded-md px-2 text-[11px] font-bold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
+                    className="h-7 rounded-md px-2 text-[11px] font-bold tabular-nums text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
                   >
                     +{delta}
                   </button>
@@ -380,9 +405,9 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
                     key={rate}
                     type="button"
                     onClick={() => handleRateChange(rate)}
-                    className={`h-7 rounded-md px-2 text-[11px] font-bold transition-colors ${
+                    className={`h-7 rounded-md px-2 text-[11px] font-bold tabular-nums transition-colors ${
                       Math.abs(playbackRate - rate) < 0.01
-                        ? 'bg-gray-900 text-white shadow-sm'
+                        ? 'bg-indigo-600 text-white shadow-sm'
                         : 'text-gray-500 hover:text-gray-900'
                     }`}
                   >
@@ -393,16 +418,18 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
             )}
           </div>
 
-          <div className="mt-2 flex flex-col gap-1.5 px-1 text-[10.5px] text-gray-500 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-            <div className="leading-relaxed">
+          <div className="mt-2 flex flex-col gap-1.5 px-1 text-[11px] text-gray-500 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <div className="flex items-start gap-1.5 leading-relaxed">
+              <Lightbulb size={13} className="mt-0.5 shrink-0 text-amber-500" aria-hidden="true" />
+              <span>
               {language === 'zh' ? (
                 <>
-                  💡 已安裝 Transpose？先點右側「在 YouTube 開啟」，再從瀏覽器工具列啟用插件；還沒安裝可{' '}
+                  已安裝 Transpose？先點右側「在 YouTube 開啟」，再從瀏覽器工具列啟用插件；還沒安裝可{' '}
                   <a
                     href={TRANSPOSE_EXTENSION_URL}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="font-bold text-indigo-600 underline-offset-2 hover:underline"
+                    className="font-semibold text-indigo-600 underline-offset-2 hover:underline"
                   >
                     安裝 Transpose
                   </a>
@@ -410,24 +437,25 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
                 </>
               ) : (
                 <>
-                  💡 Already have Transpose? Open this video on YouTube, then enable it from the browser toolbar. If not,{' '}
+                  Already have Transpose? Open this video on YouTube, then enable it from the browser toolbar. If not,{' '}
                   <a
                     href={TRANSPOSE_EXTENSION_URL}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="font-bold text-indigo-600 underline-offset-2 hover:underline"
+                    className="font-semibold text-indigo-600 underline-offset-2 hover:underline"
                   >
                     install Transpose
                   </a>
                   .
                 </>
               )}
+              </span>
             </div>
             <a
               href={getYouTubeWatchUrl(videoId)}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 self-start rounded-lg border border-gray-300 bg-white px-3 text-[11px] font-bold text-gray-700 shadow-sm transition-colors hover:border-indigo-300 hover:text-indigo-700 sm:self-auto"
+              className="ui-press inline-flex h-8 shrink-0 items-center gap-1.5 self-start rounded-lg border border-gray-300 bg-white px-3 text-[11px] font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-300 hover:text-indigo-700 sm:self-auto"
               title={language === 'zh' ? '在 YouTube 中開啟此影片' : 'Open this video on YouTube'}
             >
               <ExternalLink size={12} />
@@ -435,22 +463,22 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
             </a>
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] font-semibold text-gray-600 sm:grid-cols-4">
-            <div className="rounded-lg border border-gray-200 bg-white px-2.5 py-2">
-              <div className="text-gray-400">{language === 'zh' ? 'Reference 調' : 'Reference Key'}</div>
-              <div className="mt-0.5 text-sm font-bold text-gray-900">{activeReference?.key ?? '—'}</div>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] font-medium text-gray-500 sm:grid-cols-4">
+            <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-[color:var(--color-surface-sunken)]">
+              <div className="text-gray-500">{language === 'zh' ? 'Reference 調' : 'Reference Key'}</div>
+              <div className="mt-0.5 text-sm font-bold tabular-nums text-gray-900">{activeReference?.key ?? '—'}</div>
             </div>
-            <div className="rounded-lg border border-gray-200 bg-white px-2.5 py-2">
-              <div className="text-gray-400">{language === 'zh' ? '目前譜面' : 'Chart Key'}</div>
-              <div className="mt-0.5 text-sm font-bold text-gray-900">{formatKeyName(currentKey, currentKeyMode(song))}</div>
+            <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-[color:var(--color-surface-sunken)]">
+              <div className="text-gray-500">{language === 'zh' ? '目前譜面' : 'Chart Key'}</div>
+              <div className="mt-0.5 text-sm font-bold tabular-nums text-gray-900">{formatKeyName(currentKey, currentKeyMode(song))}</div>
             </div>
-            <div className="rounded-lg border border-gray-200 bg-white px-2.5 py-2">
-              <div className="text-gray-400">{language === 'zh' ? '相差半音' : 'Offset'}</div>
-              <div className="mt-0.5 text-sm font-bold text-gray-900">{formatOffset(activeReference?.key, currentKey)}</div>
+            <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-[color:var(--color-surface-sunken)]">
+              <div className="text-gray-500">{language === 'zh' ? '相差半音' : 'Offset'}</div>
+              <div className="mt-0.5 text-sm font-bold tabular-nums text-gray-900">{formatOffset(activeReference?.key, currentKey)}</div>
             </div>
-            <div className="rounded-lg border border-gray-200 bg-white px-2.5 py-2">
-              <div className="text-gray-400">{language === 'zh' ? '練習 BPM' : 'Practice BPM'}</div>
-              <div className="mt-0.5 text-sm font-bold text-gray-900">
+            <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-[color:var(--color-surface-sunken)]">
+              <div className="text-gray-500">{language === 'zh' ? '練習 BPM' : 'Practice BPM'}</div>
+              <div className="mt-0.5 text-sm font-bold tabular-nums text-gray-900">
                 {typeof referenceBpm === 'number' && effectiveBpm !== null
                   ? `${effectiveBpm} BPM`
                   : '—'}
@@ -459,7 +487,7 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </PresenceSurface>
   );
 };
 

@@ -64,8 +64,9 @@ it('undoes and redoes song order through the global preview buttons without chan
 it('restores a deleted project and its setlist grouping in one undo, then redoes the deletion',async()=>{
   saveNavigationLocation(getNavigationStorageKey(null,null),{...remembered,filter:{kind:'all'},view:'list'});mount();
   fireEvent.click(await screen.findByRole('button',{name:'專案操作：洛杉磯烈火'}));
-  const confirm=vi.spyOn(window,'confirm').mockReturnValue(true);
   fireEvent.click(await screen.findByRole('menuitem',{name:'刪除專案'}));
+  const deleteDialog=await screen.findByRole('alertdialog');
+  fireEvent.click(within(deleteDialog).getByRole('button',{name:'刪除專案'}));
   const list=()=>document.querySelector<HTMLElement>('[data-setlist-panel-layer][data-ui-presence="visible"] [data-setlist-scroll]')!;
   await within(list()).findByRole('button',{name:/^聚會一(?: |$)/});
   expect(within(list()).queryByRole('button',{name:/^洛杉磯烈火/})).toBeNull();
@@ -74,7 +75,7 @@ it('restores a deleted project and its setlist grouping in one undo, then redoes
   expect(within(list()).queryByRole('button',{name:/^聚會一(?: |$)/})).toBeNull();
   const redo=screen.getByRole('button',{name:'重做 (Shift+Cmd/Ctrl+Z)'});await waitFor(()=>expect(redo).toBeEnabled());fireEvent.click(redo);
   await within(list()).findByRole('button',{name:/^聚會一(?: |$)/});
-  expect(within(list()).queryByRole('button',{name:/^洛杉磯烈火/})).toBeNull();confirm.mockRestore();
+  expect(within(list()).queryByRole('button',{name:/^洛杉磯烈火/})).toBeNull();
 });
 it.each(['meeting', 'project'])('falls back one level when the remembered %s was archived', async item => {
   saveNavigationLocation(getNavigationStorageKey(null, null), remembered);
@@ -125,10 +126,11 @@ it('removes a member through an explicit action without changing their role', as
   await openMembers();
   fireEvent.click(screen.getByRole('button',{name:'測試成員的成員操作'}));
   expect(state.changeRole).not.toHaveBeenCalled();expect(state.removeMember).not.toHaveBeenCalled();
-  const confirm=vi.spyOn(window,'confirm').mockReturnValue(true);
   fireEvent.click(await screen.findByRole('menuitem',{name:'移除成員'}));
+  const removeDialog=await screen.findByRole('alertdialog');
+  fireEvent.click(within(removeDialog).getByRole('button',{name:'移除成員'}));
   await waitFor(()=>expect(state.removeMember).toHaveBeenCalledWith('project','la','member'));
-  expect(state.changeRole).not.toHaveBeenCalled();confirm.mockRestore();
+  expect(state.changeRole).not.toHaveBeenCalled();
 });
 it('puts project folders and loose setlists at the same root level without an All or Ungrouped view', async () => {
   fixture.setlists.push({...fixture.setlists[0],id:'loose',name:'臨時聚會',projectId:null,songs:[]});

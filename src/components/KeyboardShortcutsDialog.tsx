@@ -1,8 +1,13 @@
 import React from 'react';
+import { useIsPresent } from 'motion/react';
 import { AudioLines, BookOpen, Keyboard, ListMusic, PencilLine, Search, SlidersHorizontal, SquareDashedMousePointer, X } from 'lucide-react';
 import type { AppLanguage } from '../types';
 import { KEYBOARD_SHORTCUT_SECTIONS as sections, type KeyboardShortcutEntry } from '../constants/keyboardShortcuts';
 import { useModalFocus } from '../hooks/useModalFocus';
+import { useUiMotion } from '../hooks/useUiMotion';
+import { useContentSwitchMotion } from '../hooks/useContentSwitchMotion';
+import { backdropVariants, modalVariants } from '../lib/uiMotion';
+import { PresenceSurface } from './ui/InteractionMotion';
 import MeasuredSlidingSelection from './ui/MeasuredSlidingSelection';
 import './KeyboardShortcutsDialog.css';
 
@@ -45,7 +50,9 @@ function normalize(value: string) {
 }
 
 export default function KeyboardShortcutsDialog({ language, onClose }: Props) {
-  const dialog = React.useRef<HTMLElement>(null);
+  const present = useIsPresent();
+  const preference = useUiMotion();
+  const dialog = React.useRef<HTMLDivElement>(null);
   const content = React.useRef<HTMLDivElement>(null);
   const input = React.useRef<HTMLInputElement>(null);
   const [group, setGroup] = React.useState(sections[0].id);
@@ -68,9 +75,11 @@ export default function KeyboardShortcutsDialog({ language, onClose }: Props) {
     })
   })).filter(section => section.shortcuts.length) : sections.filter(section => section.id === group);
   const count = visible.reduce((total, section) => total + section.shortcuts.length, 0);
-  useModalFocus(true, dialog, true);
+  useModalFocus(present, dialog, true);
+  useContentSwitchMotion(content, searching ? 'search' : group, present);
   React.useLayoutEffect(() => { if (content.current) content.current.scrollTop = 0; }, [group, query]);
   React.useEffect(() => {
+    if (!present) return;
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.isComposing) return;
       event.preventDefault();
@@ -79,18 +88,22 @@ export default function KeyboardShortcutsDialog({ language, onClose }: Props) {
     };
     window.addEventListener('keydown', escape, true);
     return () => window.removeEventListener('keydown', escape, true);
-  }, [onClose]);
+  }, [onClose, present]);
 
   const select = (id: string) => { setGroup(id); setQuery(''); };
-  return <div className="shortcuts-backdrop" data-keyboard-shortcuts-dialog onPointerDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-    <section ref={dialog} className="shortcuts-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}
+  return <PresenceSurface className="shortcuts-backdrop" data-keyboard-shortcuts-dialog
+    custom={preference} variants={backdropVariants} initial={preference.instant ? false : 'hidden'} animate="visible" exit="exit"
+    onPointerDown={e => { if (present && e.target === e.currentTarget) onClose(); }}>
+    <PresenceSurface ref={dialog} className="shortcuts-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}
+      custom={preference} variants={modalVariants} initial={preference.instant ? false : 'hidden'} animate="visible" exit="exit"
       onKeyDown={e => e.stopPropagation()}>
-      <button type="button" className="shortcuts-close" aria-label={zh ? '關閉快捷鍵' : 'Close shortcuts'} onClick={onClose}><X size={19} aria-hidden="true"/></button>
+      <button type="button" className="ui-press shortcuts-close" aria-label={zh ? '關閉快捷鍵' : 'Close shortcuts'} onClick={onClose}><X size={19} aria-hidden="true"/></button>
       <header className="shortcuts-header">
         <h2 id={titleId}><span className="shortcuts-emblem"><Keyboard size={24} aria-hidden="true"/></span>{title}</h2>
         <label className="shortcuts-search"><Search size={16} aria-hidden="true"/>
           <input type="search" name="shortcut-search" ref={input} aria-label={zh ? '搜尋全部快捷鍵' : 'Search all shortcuts'} placeholder={zh ? '搜尋操作或按鍵…' : 'Search actions or keys…'}
             autoComplete="off" spellCheck={false} value={query} onChange={e => setQuery(e.target.value)}/>
+          {query && <button type="button" className="ui-press shortcuts-search-clear" aria-label={zh ? '清除搜尋' : 'Clear search'} onClick={() => { setQuery(''); input.current?.focus(); }}><X size={14} aria-hidden="true"/></button>}
         </label>
       </header>
       <div className="shortcuts-body">
@@ -120,6 +133,6 @@ export default function KeyboardShortcutsDialog({ language, onClose }: Props) {
             <button type="button" onClick={() => { setQuery(''); input.current?.focus(); }}>{zh ? '清除搜尋' : 'Clear search'}</button></div>}
         </div>
       </div>
-    </section>
-  </div>;
+    </PresenceSurface>
+  </PresenceSurface>;
 }

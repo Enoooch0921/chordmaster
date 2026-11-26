@@ -7,7 +7,7 @@ import { ToastProvider } from './components/Toast';
 import { getNavigationStorageKey, loadNavigationLocation, saveNavigationLocation, type SetlistNavigationLocation } from './lib/setlistNavigationMemory';
 import type { LibraryRole, WorkspaceSnapshot } from './types';
 
-const state = vi.hoisted(() => ({ cloud: false, email: 'controls@example.invalid', role: 'viewer' as LibraryRole, saveCapo: vi.fn(), adoptTempo: vi.fn(), refresh: vi.fn(() => false) }));
+const state = vi.hoisted(() => ({ cloud: false, email: 'controls@example.invalid', role: 'viewer' as LibraryRole, saveCapo: vi.fn(), adoptTempo: vi.fn(), trashEntries: vi.fn(), refresh: vi.fn(() => false) }));
 let fixture: WorkspaceSnapshot;
 vi.mock('./components/useAnchoredPortalPanel', () => ({ useAnchoredPortalPanel: () => ({ panelStyle: { position: 'fixed', top: 0, left: 0 }, placement: 'bottom', isPositioned: true, transformOrigin: 'top right' }) }));
 vi.mock('./lib/auth', () => ({ useSupabaseAuth: () => ({ user: state.cloud ? { id: 'controls-user', email: state.email, name: 'Controls' } : null,
@@ -16,7 +16,7 @@ vi.mock('./lib/workspace', async original => ({ ...await original<typeof import(
 vi.mock('./lib/repository', () => ({ createCloudRepository: () => ({
   listLibraries: async () => [{ id: 'team', name: 'Controls team', kind: 'team', role: state.role, ownerUserId: 'owner', createdAt: '', updatedAt: '' }],
   setActiveLibrary: vi.fn(), loadLibraryWorkspace: async () => fixture, saveCapoOverride: state.saveCapo,
-  setOriginalTempoIfUnset: state.adoptTempo,
+  setOriginalTempoIfUnset: state.adoptTempo, trashWorkspaceResources: state.trashEntries,
   getNotifications: async () => [], getShareContacts: async () => [], getPendingTeamInvites: async () => [],
   getSetlistShareStatus: async () => ({ activeToken: null, activeCreatedAt: null, participantCount: 0, participants: [] }),
   getSetlistEditorAssignments: async () => ({ members: [], assignments: [] }), subscribeToLibraryChanges: () => () => {}
@@ -70,7 +70,7 @@ beforeEach(() => {
   });
 
   localStorage.clear(); state.cloud = false; state.email = 'controls@example.invalid'; state.role = 'viewer'; state.saveCapo.mockReset().mockResolvedValue(undefined);
-  state.adoptTempo.mockReset(); state.refresh.mockClear();
+  state.adoptTempo.mockReset(); state.trashEntries.mockReset(); state.refresh.mockClear();
   elementFromPoint.mockReset();
   const songs = [
     { id: 'first', title: '第一首歌曲', originalKey: 'C' as const, currentKey: 'C' as const, timeSignature: '4/4', updatedAt: 1, sections: [{ id: 'verse-first', title: 'Verse', bars: [{ id: 'bar-first', chords: ['C'] }] }] },
@@ -306,6 +306,7 @@ it('keeps keys and tempo read-only for a viewer while saving personal Capo from 
   await waitFor(() => expect(within(row('entry-second')).getByRole('button', { name: 'Key D' })).toBeDisabled());
   expect(within(row('entry-second')).getByRole('button', { name: '速度 未設定 BPM' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: /^拖動排序：/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: '多選移除' })).toBeNull();
   expect(within(row('entry-second')).queryByText('Capo')).toBeNull();
   const height = screen.getByRole('group', { name: '歌單小節高度' });
   const sharedBeforeHeightChange = JSON.stringify(liveWorkspace().setlists);
@@ -338,19 +339,91 @@ it('uses the same phonetic search when choosing songs to add', async () => {
 const liveWorkspace = () => (state.refresh.mock.calls.at(-1) as unknown as [Parameters<typeof import('./hooks/useLibraryWorkspaceRefresh').useLibraryWorkspaceRefresh>[0]])[0].workspace;
 it('removes the only song while preserving the empty setlist and its source song', async () => {
   fixture.setlists[0].songs = [fixture.setlists[0].songs[0]];
-  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
   await mount('entry-first');
   const originalSongs = structuredClone(liveWorkspace().songs);
   fireEvent.click(within(row('entry-first')).getByRole('button', { name: '歌曲操作：第一首歌曲' }));
   fireEvent.click(await screen.findByRole('menuitem', { name: '移出歌單' }));
+  const dialog = await screen.findByRole('alertdialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: '移出歌單' }));
   await waitFor(() => expect(rowOrder()).toEqual([]));
   expect(liveWorkspace().setlists).toHaveLength(1);
   expect(liveWorkspace().setlists[0].songs).toEqual([]);
   expect(liveWorkspace().songs).toEqual(originalSongs);
-  expect(currentSong()).toBeNull();
+  await waitFor(() => expect(currentSong()).toBeNull());
   expect(screen.getByRole('button', { name: '加入歌曲' })).toBeEnabled();
-  confirm.mockRestore();
 });
+
+it('removes only checked entries, including repeated songs, and restores them together with Undo', async () => {
+  const setlist = fixture.setlists[0];
+  setlist.songs.push({ ...setlist.songs[1], id: 'entry-repeat', order: 2 });
+  await mount();
+  const originalSongs = structuredClone(liveWorkspace().songs);
+  fireEvent.click(screen.getByRole('button', { name: '多選移除' }));
+  const first = screen.getByRole('checkbox', { name: '選取第 1 首：第一首歌曲' });
+  const second = screen.getByRole('checkbox', { name: '選取第 2 首：第二首歌曲' });
+  const repeated = screen.getByRole('checkbox', { name: '選取第 3 首：第二首歌曲' });
+  expect(first).toHaveFocus();
+  expect(screen.getAllByRole('checkbox')).toHaveLength(3);
+  const remove = screen.getByRole('button', { name: '移出選取' });
+  expect(remove).toBeDisabled();
+  fireEvent.click(second);
+  fireEvent.click(repeated);
+  const toolbar = screen.getByRole('group', { name: '移出選取歌曲' });
+  expect(within(toolbar).getByRole('status')).toHaveTextContent('已選 2 首');
+  expect(first).not.toBeChecked();
+  remove.focus();
+  fireEvent.click(remove);
+  const dialog = await screen.findByRole('alertdialog', { name: '移出 2 首歌曲' });
+  fireEvent.click(within(dialog).getByRole('button', { name: '取消' }));
+  await waitFor(() => expect(remove).toHaveFocus());
+  expect(rowOrder()).toEqual(['entry-first', 'entry-second', 'entry-repeat']);
+  expect(second).toBeChecked();
+  expect(repeated).toBeChecked();
+
+  fireEvent.click(remove);
+  const confirmation = await screen.findByRole('alertdialog', { name: '移出 2 首歌曲' });
+  fireEvent.click(within(confirmation).getByRole('button', { name: '移出 2 首' }));
+  await waitFor(() => expect(rowOrder()).toEqual(['entry-first']));
+  expect(currentSong()).toBe('entry-first');
+  expect(liveWorkspace().songs).toEqual(originalSongs);
+  expect(screen.getByRole('button', { name: '多選移除' })).toHaveFocus();
+
+  const undo = screen.getByRole('button', { name: '復原 (Cmd/Ctrl+Z)' });
+  await waitFor(() => expect(undo).toBeEnabled());
+  fireEvent.click(undo);
+  await waitFor(() => expect(rowOrder()).toEqual(['entry-first', 'entry-second', 'entry-repeat']));
+}, 15000);
+
+it('keeps checked cloud entries in place if the atomic removal fails and lets the user retry', async () => {
+  state.cloud = true;
+  state.role = 'owner';
+  state.trashEntries.mockRejectedValueOnce(new Error('測試移出失敗')).mockResolvedValueOnce([
+    { type: 'entry', id: 'entry-first', trashId: 'receipt-first' },
+    { type: 'entry', id: 'entry-second', trashId: 'receipt-second' }
+  ]);
+  await mount();
+  fireEvent.click(screen.getByRole('button', { name: '多選移除' }));
+  for (const checkbox of screen.getAllByRole('checkbox')) fireEvent.click(checkbox);
+  const remove = screen.getByRole('button', { name: '移出選取' });
+  const confirmRemoval = async () => {
+    fireEvent.click(remove);
+    const dialog = await screen.findByRole('alertdialog', { name: '移出 2 首歌曲' });
+    fireEvent.click(within(dialog).getByRole('button', { name: '移出 2 首' }));
+  };
+  await confirmRemoval();
+  await screen.findByText('測試移出失敗');
+  expect(rowOrder()).toEqual(['entry-first', 'entry-second']);
+  expect(screen.getAllByRole('checkbox', { checked: true })).toHaveLength(2);
+  expect(state.trashEntries).toHaveBeenCalledExactlyOnceWith(fixture.setlists[0].songs.map(entry => ({
+    type: 'entry', id: entry.id, expected: expect.objectContaining({ id: entry.id, setlistId: 'meeting', songId: entry.songId })
+  })));
+
+  await confirmRemoval();
+  await waitFor(() => expect(rowOrder()).toEqual([]));
+  expect(state.trashEntries).toHaveBeenCalledTimes(2);
+  expect(liveWorkspace().songs).toHaveLength(2);
+  expect(screen.getByRole('button', { name: '加入歌曲' })).toHaveFocus();
+}, 20000);
 it('restores the source BPM only in the selected setlist copy', async () => {
   fixture.songs[1].tempo = 92;
   fixture.setlists[0].songs[1].songData = { ...fixture.songs[1], tempo: 110 };

@@ -1,4 +1,5 @@
 import { AnimatedPopover } from './ui/InteractionMotion';
+import SlidingSelection from './ui/SlidingSelection';
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
@@ -109,6 +110,8 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
   const optionRefs = React.useRef<Partial<Record<Key, HTMLButtonElement | null>>>({});
   const clearButtonRef = React.useRef<HTMLButtonElement>(null);
   const [isOpen, setIsOpen] = React.useState(false);
+  const [hasOpened, setHasOpened] = React.useState(false);
+  if (isOpen && !hasOpened) setHasOpened(true);
   const instantExit = React.useRef(false);
   const focusFrame = React.useRef<number | null>(null);
   const panelId = React.useId();
@@ -239,7 +242,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
         type="button"
         disabled={disabled}
         onClick={() => { if (!disabled) { instantExit.current = false; setIsOpen(open => !open); } }}
-        className={`ui-press flex items-center justify-between gap-2 border border-gray-300 bg-white text-left outline-none transition-colors ${
+        className={`ui-press flex items-center justify-between gap-2 border border-gray-300 bg-white text-left outline-none transition-colors focus-visible:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-500/25 ${
           isCompactTrigger
             ? 'h-9 min-w-[74px] rounded-lg px-2.5'
             : 'h-10 min-w-[92px] rounded-xl px-3'
@@ -247,7 +250,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
           disabled
             ? 'cursor-not-allowed text-gray-400'
             : isOpen
-              ? 'border-indigo-500 ring-2 ring-indigo-500'
+              ? 'border-indigo-500 ring-2 ring-indigo-500/25'
               : 'text-gray-700 hover:border-gray-400'
         } ${buttonClassName}`}
         style={buttonStyle}
@@ -272,29 +275,31 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
         ) : null}
       </button>
 
-      {typeof document !== 'undefined' && createPortal(
-        <AnimatedPopover open={isOpen} ready={isPositioned} instantExit={instantExit.current} origin={transformOrigin}
+      {hasOpened && typeof document !== 'undefined' && createPortal(
+        <AnimatedPopover animateOnMount open={isOpen} ready={isPositioned} instantExit={instantExit.current} origin={transformOrigin}
           id={panelId} role="dialog" aria-label={label}
           panelRef={panelRef}
-          className={`ui-anchored-panel ${touchOptimized ? 'w-[216px] p-3' : 'w-[184px] p-2.5'} rounded-[20px] border border-gray-200 bg-white shadow-xl`}
+          className={`ui-anchored-panel ${touchOptimized ? 'w-[216px] p-3' : 'w-[184px] p-2.5'} rounded-2xl border border-gray-200 bg-white shadow-xl`}
           style={panelStyle}
           data-placement={placement}
         >
-          <div className="mb-2 flex items-center justify-between px-1">
-            <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">{label}</div>
+          <div className="mb-2 flex items-center justify-between gap-2 px-1">
+            <div className="text-[11px] font-semibold text-gray-500">{label}</div>
             {resolvedPanelMetaText ? (
-              <div className="text-[10px] font-bold text-gray-500">{resolvedPanelMetaText}</div>
+              <div className="truncate text-[11px] font-semibold tabular-nums text-gray-500">{resolvedPanelMetaText}</div>
             ) : null}
           </div>
 
           {onModeChange && <div className="mb-2 space-y-2">
-            <div className="flex gap-1" role="group" aria-label={language === 'zh' ? '大小調' : 'Tonal mode'}>
+            <div className="relative flex gap-1 rounded-lg bg-gray-100 p-0.5 dark:bg-[color:var(--color-surface-sunken)]" role="group" aria-label={language === 'zh' ? '大小調' : 'Tonal mode'}>
+              <SlidingSelection index={mode === 'minor' ? 1 : 0} count={2} inset={2} gap={4}
+                className="bg-indigo-50 ring-1 ring-inset ring-indigo-300 dark:bg-[color:var(--color-indigo-950)] dark:ring-[color:var(--color-indigo-700)]" style={{ borderRadius: 6 }} />
               {(['major', 'minor'] as const).map(nextMode => <button key={nextMode} type="button" aria-pressed={mode === nextMode}
-                disabled={disabled} onClick={() => { if (!disabled) onModeChange(nextMode); }} className={`flex-1 rounded-lg border px-2 py-2 text-xs font-semibold ${mode === nextMode ? 'border-indigo-400 bg-indigo-50 text-indigo-800' : 'border-gray-200'}`}>
+                disabled={disabled} onClick={() => { if (!disabled) onModeChange(nextMode); }} className={`relative flex-1 rounded-md px-2 py-2 text-xs font-semibold transition-colors ${mode === nextMode ? 'text-indigo-800 dark:text-indigo-200' : 'text-gray-600 hover:text-gray-900'}`}>
                 {language === 'zh' ? (nextMode === 'major' ? '大調' : '小調') : (nextMode === 'major' ? 'Major' : 'Minor')}
               </button>)}
             </div>
-            {originalKey && <button type="button" className="w-full rounded-lg border border-gray-200 py-1 text-xs" disabled={disabled} onClick={() => { if (disabled) return; onChange(originalKey, originalMode); closePanel(true, true); }}>
+            {originalKey && <button type="button" className="ui-press w-full rounded-lg border border-gray-200 py-1 text-xs transition-colors hover:bg-gray-50" disabled={disabled} onClick={() => { if (disabled) return; onChange(originalKey, originalMode); closePanel(true, true); }}>
               {language === 'zh' ? '還原原調' : 'Original'} {formatKeyName(originalKey, originalMode)}
             </button>}
           </div>}
@@ -319,7 +324,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
                 }}
                 className={`flex ${touchOptimized ? 'h-11 text-sm' : 'h-[34px] text-[12px]'} w-full items-center justify-center rounded-xl border font-semibold tracking-tight transition-colors ${
                   value === null
-                    ? 'border-indigo-400 bg-indigo-100 text-indigo-800 shadow-sm shadow-indigo-100'
+                    ? 'border-indigo-400 bg-indigo-100 text-indigo-800'
                     : 'border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50'
                 }`}
               >
@@ -347,11 +352,11 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
                     type="button"
                     onClick={() => handleSelect(key)}
                     onKeyDown={(event) => handleOptionKeyDown(event, key)}
-                    className={`relative flex ${touchOptimized ? 'h-12 text-[15px]' : 'h-[42px] text-[14px]'} items-center justify-center rounded-[12px] border font-semibold tracking-tight transition-colors ${
+                    className={`relative flex ${touchOptimized ? 'h-12 text-[15px]' : 'h-[42px] text-[14px]'} items-center justify-center rounded-xl border font-semibold tracking-tight transition-colors ${
                       isSelectedKey
                         ? isOriginalKey
-                          ? 'border-indigo-400 bg-indigo-100 text-indigo-800 shadow-sm shadow-indigo-100'
-                          : 'border-indigo-300 bg-indigo-50 text-indigo-700 shadow-sm shadow-indigo-100'
+                          ? 'border-indigo-400 bg-indigo-100 text-indigo-800'
+                          : 'border-indigo-300 bg-indigo-50 text-indigo-700'
                         : isOriginalKey
                           ? 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 hover:border-fuchsia-300 hover:bg-fuchsia-100'
                           : 'border-gray-200 bg-white text-gray-800 hover:border-indigo-200 hover:bg-gray-50'

@@ -26,6 +26,8 @@ export default function MobileSidebarNavigation(props: Props) {
   const menuButton = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [hasOpenedMenu, setHasOpenedMenu] = useState(false);
+  if (menuOpen && !hasOpenedMenu) setHasOpenedMenu(true);
   const instantExit = useRef(false);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
   const { panelStyle, isPositioned, transformOrigin } = useAnchoredPortalPanel({
@@ -96,7 +98,7 @@ export default function MobileSidebarNavigation(props: Props) {
         <button ref={menuButton} type="button" aria-label={props.moreLabel} title={props.moreLabel} aria-expanded={menuOpen} aria-haspopup="dialog" onClick={() => { instantExit.current = false; setMenuOpen(open => !open); }} className="ui-press flex h-11 w-11 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100">
           <MoreHorizontal size={20} />
         </button>
-        {typeof document !== 'undefined' && createPortal(<AnimatedPopover open={menuOpen} instantExit={instantExit.current} ready={isPositioned} panelRef={panel} style={panelStyle} origin={transformOrigin} role="dialog" aria-label={props.moreLabel} className="ui-anchored-panel w-36 rounded-xl border border-gray-200 bg-white p-1 shadow-lg dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface-raised)]">
+        {hasOpenedMenu && typeof document !== 'undefined' && createPortal(<AnimatedPopover animateOnMount open={menuOpen} instantExit={instantExit.current} ready={isPositioned} panelRef={panel} style={panelStyle} origin={transformOrigin} role="dialog" aria-label={props.moreLabel} className="ui-anchored-panel w-36 rounded-xl border border-gray-200 bg-white p-1 shadow-lg dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface-raised)]">
           <button type="button" onClick={() => { props.onAbout(); setMenuOpen(false); }} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-gray-700 hover:bg-gray-100 dark:text-[color:var(--color-text)] dark:hover:bg-[color:var(--color-surface)]">
             <Info size={16} />{props.aboutLabel}
           </button>

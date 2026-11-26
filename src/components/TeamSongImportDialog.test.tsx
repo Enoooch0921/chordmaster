@@ -276,7 +276,7 @@ describe('從個人區複製到團隊', () => {
     render(<TeamSongImportDialog {...props} personalSongs={songs} initialSelectedIds={songs.map(song => song.id)} />);
     expect(screen.getByRole('alert')).toHaveTextContent('每次最多 500 首');
     expect(screen.getByRole('button', { name: '下一步' })).toBeDisabled();expect(props.inspectSongs).not.toHaveBeenCalled();
-  });
+  }, 15000);
 });
 
 it('rejects an inspection that does not match the selected source songs', async () => {

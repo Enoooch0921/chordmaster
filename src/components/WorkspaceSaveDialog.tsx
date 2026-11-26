@@ -15,7 +15,7 @@ export default function WorkspaceSaveDialog({ language, workspaceName, changes, 
   const preference = useUiMotion();
   useModalFocus(present, ref);
   const zh = language === 'zh';
-  return <PresenceSurface custom={preference} variants={backdropVariants} initial="hidden" animate="visible" exit="exit" className="fixed inset-0 z-[6000] flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-[2px]" onKeyDown={event => {
+  return <PresenceSurface custom={preference} variants={backdropVariants} initial="hidden" animate="visible" exit="exit" className="fixed inset-0 z-[6000] flex items-center justify-center bg-slate-950/38 p-4" onKeyDown={event => {
     if (event.key === 'Escape') { event.stopPropagation(); onCancel(); }
   }}>
     <PresenceSurface ref={ref} custom={preference} variants={modalVariants} initial="hidden" animate="visible" exit="exit" role="alertdialog" aria-modal="true" aria-labelledby="workspace-save-title" aria-describedby="workspace-save-description" className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-3xl border border-slate-200 bg-white p-5 shadow-2xl">
@@ -28,9 +28,9 @@ export default function WorkspaceSaveDialog({ language, workspaceName, changes, 
         </li>)}
       </ul>
       <div className="mt-5 flex flex-wrap justify-end gap-2">
-        <button type="button" onClick={onCancel} className="min-h-11 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-700">{zh ? '取消' : 'Cancel'}</button>
-        <button type="button" onClick={onDiscard} className="min-h-11 rounded-xl border border-rose-200 px-3 py-2.5 text-sm font-semibold text-rose-700">{zh ? '捨棄並切換' : 'Discard and switch'}</button>
-        <button type="button" onClick={onSave} className="min-h-11 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white">{zh ? '儲存並切換' : 'Save and switch'}</button>
+        <button type="button" onClick={onCancel} className="ui-press min-h-11 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">{zh ? '取消' : 'Cancel'}</button>
+        <button type="button" onClick={onDiscard} className="ui-press min-h-11 rounded-xl border border-rose-200 px-3 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50">{zh ? '捨棄並切換' : 'Discard and switch'}</button>
+        <button type="button" onClick={onSave} className="ui-press min-h-11 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">{zh ? '儲存並切換' : 'Save and switch'}</button>
       </div>
     </PresenceSurface>
   </PresenceSurface>;

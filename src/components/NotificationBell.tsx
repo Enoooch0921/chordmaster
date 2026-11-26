@@ -24,13 +24,16 @@ interface NotificationBellProps {
   };
   onOpen: (notification: AppNotification) => void;
   onMarkAllRead: () => void;
+  buttonClassName?: string;
 }
 
 // Header inbox: a bell with an unread badge and a dropdown listing
 // "X shared a setlist/project with you" notifications. Opening one navigates to
 // the resource (handled by the parent) and the unread state clears.
-export const NotificationBell = ({ notifications, labels, onOpen, onMarkAllRead }: NotificationBellProps) => {
+export const NotificationBell = ({ notifications, labels, onOpen, onMarkAllRead, buttonClassName }: NotificationBellProps) => {
   const [open, setOpen] = useState(false);
+  const [hasOpened, setHasOpened] = useState(false);
+  if (open && !hasOpened) setHasOpened(true);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreTriggerFocus = useRef(false);
@@ -62,37 +65,37 @@ export const NotificationBell = ({ notifications, labels, onOpen, onMarkAllRead 
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={() => setOpen((current) => !current)}
-        className="relative flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 transition-colors hover:bg-gray-50"
+        className={`ui-press relative flex items-center justify-center border border-gray-200 bg-white text-gray-600 transition-colors hover:bg-gray-50 ${buttonClassName ?? 'h-9 w-9 rounded-full'}`}
         aria-label={labels.title}
       >
         <Bell size={16} />
         {unreadCount > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white">
+          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold tabular-nums leading-none text-white">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
       </button>
 
-      {createPortal(
+      {hasOpened && createPortal(
         <>
           {open && <div className="fixed inset-0 z-[299]" onClick={close} />}
-          <AnimatedPopover open={open} ready={isPositioned} panelRef={panelRef} origin={transformOrigin} tabIndex={-1} role="dialog" aria-label={labels.title} style={panelStyle} className="flex max-h-[min(560px,calc(100dvh-2rem))] w-96 max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl">
+          <AnimatedPopover animateOnMount open={open} ready={isPositioned} panelRef={panelRef} origin={transformOrigin} tabIndex={-1} role="dialog" aria-label={labels.title} style={panelStyle} className="flex max-h-[min(560px,calc(100dvh-2rem))] w-96 max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl">
             <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-gray-100 px-4 py-3">
               <span className="min-w-0 flex-1 text-base font-semibold text-gray-900">{labels.title}</span>
               {unreadCount > 0 && (
                 <button
                   type="button"
                   onClick={onMarkAllRead}
-                  className="min-h-11 rounded-lg px-2 text-xs font-semibold text-indigo-600 transition-colors hover:text-indigo-800"
+                  className="ui-press min-h-11 rounded-lg px-2 text-xs font-semibold text-indigo-600 transition-colors hover:text-indigo-800"
                 >
                   {labels.markAllRead}
                 </button>
               )}
-              <button type="button" onClick={close} aria-label={labels.close} className="flex size-11 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100"><X size={19} /></button>
+              <button type="button" onClick={close} aria-label={labels.close} className="ui-press flex size-11 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100"><X size={19} /></button>
             </div>
 
             {notifications.length === 0 ? (
-              <div className="px-3 py-6 text-center text-xs font-medium text-gray-400">{labels.empty}</div>
+              <div className="px-3 py-6 text-center text-xs font-medium text-gray-500">{labels.empty}</div>
             ) : (
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 {notifications.map((item) => {

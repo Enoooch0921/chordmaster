@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Check, ChevronDown } from 'lucide-react';
 import type { AuditionScope } from '../../lib/chordAudition';
 import { useAnchoredPortalPanel } from '../useAnchoredPortalPanel';
+import { AnimatedPopover } from '../ui/InteractionMotion';
 
 interface Props {
   open?: boolean;
@@ -26,12 +27,14 @@ export default function ChordAuditionSettings({ children, open: controlled, onOp
   const [localOpen, setLocalOpen] = useState(false);
   const open = controlled ?? localOpen;
   const setOpen = onOpenChange ?? setLocalOpen;
+  const [hasOpened, setHasOpened] = useState(open);
+  if (open && !hasOpened) setHasOpened(true);
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const id = useId();
   const title = scope === 'practice' ? (zh ? '練唱設定' : 'Practice settings') : (zh ? '試聽設定' : 'Audition settings');
   const close = useCallback(() => setOpen(false), [setOpen]);
-  const { panelStyle, isPositioned, placement } = useAnchoredPortalPanel({
+  const { panelStyle, isPositioned, placement, transformOrigin } = useAnchoredPortalPanel({
     isOpen: open, align: 'center', triggerRef: trigger, panelRef: panel, onRequestClose: close, zIndex: 6500
   });
   const returnFocus = () => { close(); trigger.current?.focus({ preventScroll: true }); };
@@ -56,9 +59,10 @@ export default function ChordAuditionSettings({ children, open: controlled, onOp
     <button ref={trigger} type="button" className="chord-audition-scope" title={title} aria-label={title}
       aria-controls={open ? id : undefined} aria-haspopup="dialog" aria-expanded={open}
       onClick={() => setOpen(!open)}>
-      <ChevronDown size={15} aria-hidden="true" />
+      <ChevronDown size={15} aria-hidden="true" className={`ui-motion-chevron ${open ? 'rotate-180' : ''}`} />
     </button>
-    {open && createPortal(<div id={id} ref={panel} role="dialog" aria-label={title} data-preview-edit-ui data-keyboard-refined
+    {hasOpened && createPortal(<AnimatedPopover animateOnMount open={open} ready={isPositioned} origin={transformOrigin}
+      id={id} panelRef={panel} role="dialog" aria-label={title} data-preview-edit-ui data-keyboard-refined
       className="chord-audition-settings" data-placement={placement} style={panelStyle}
       onKeyDown={event => {
         event.stopPropagation();
@@ -92,11 +96,11 @@ export default function ChordAuditionSettings({ children, open: controlled, onOp
         <input name="audition-melody" type="checkbox" checked={melody} onChange={event => setMelody(event.target.checked)} />
       </label>
       <label className="audition-delay">
-        <span>{zh ? '畫面延遲' : 'Visual delay'} <output>{visualDelayMs} ms</output></span>
+        <span>{zh ? '畫面延遲' : 'Visual delay'} <output className="tabular-nums">{visualDelayMs} ms</output></span>
         <input name="audition-delay" type="range" min="-500" max="1000" step="25" value={visualDelayMs}
           aria-label={zh ? '畫面延遲' : 'Visual delay'} aria-valuetext={`${visualDelayMs} ms`}
           onChange={event => setVisualDelayMs(Number(event.target.value))}/>
       </label>
-    </div>, document.body)}
+    </AnimatedPopover>, document.body)}
   </>;
 }

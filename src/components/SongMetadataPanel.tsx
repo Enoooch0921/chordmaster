@@ -1,6 +1,8 @@
 import { applySongVersionText, getSongVersionText as getVersionValue } from '../lib/songCredits';
 import { shouldShowSongMap } from '../lib/songMap';
 import { AnimatedDisclosure } from './ui/InteractionMotion';
+import SlidingSelection from './ui/SlidingSelection';
+import { useContentSwitchMotion } from '../hooks/useContentSwitchMotion';
 import React from 'react';
 import './SongMetadataPanel.css';
 import { AppLanguage, BarNumberMode, Key, SetlistDisplayMode, Song, SongReference, SongReferenceKind } from '../types';
@@ -291,6 +293,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   // collapsible "advanced" block so the panel stays compact on small laptops.
   const [isAdvancedOpen, setIsAdvancedOpen] = React.useState(initialAdvancedOpen);
   const [activeSection, setActiveSection] = React.useState<'details' | 'layout' | 'references'>('details');
+  const tabContentRef = React.useRef<HTMLDivElement>(null);
+  useContentSwitchMotion(tabContentRef, activeSection, deviceLayout === 'phone' || presentation === 'popover');
   const selectSection = (section: 'details' | 'layout' | 'references') => {
     const scroller = panelRef.current?.closest<HTMLElement>('[data-preview-metadata-scroll], [data-mobile-metadata-scroll]');
     if (scroller) scroller.scrollTop = 0;
@@ -314,11 +318,11 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   const segmentedSize = isStackedLayout ? 'sm' : 'xs';
   const toggleSize = isStackedLayout ? 'sm' : 'xs';
   const labelClassName = isPhoneLayout
-    ? 'mb-2 block text-[11px] font-semibold tracking-wide text-gray-500'
-    : `${isTouchOptimized ? 'text-[11px]' : 'text-[9px]'} mb-1 block font-semibold uppercase tracking-[0.16em] text-gray-400`;
-  const controlLabelClassName = isPhoneLayout ? labelClassName : 'mb-1 block text-[8px] font-semibold uppercase tracking-[0.16em] text-gray-400';
+    ? 'mb-2 block text-xs font-semibold text-gray-500'
+    : 'mb-1 block text-[11px] font-semibold text-gray-500';
+  const controlLabelClassName = isPhoneLayout ? labelClassName : 'mb-1 block text-[10px] font-semibold text-gray-500';
   const fieldHeightClassName = isTouchOptimized ? 'h-11' : isPreviewHeader ? 'h-10' : 'h-7';
-  const fieldClassName = `${fieldHeightClassName} w-full ${isPhoneLayout ? 'rounded-xl border border-gray-200 bg-gray-50/70 px-3 text-base' : 'rounded-lg border border-gray-300 bg-white px-2.5 text-[13px]'} font-medium text-gray-800 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500`;
+  const fieldClassName = `${fieldHeightClassName} w-full ${isPhoneLayout ? 'rounded-xl border border-gray-200 bg-gray-50/70 px-3 text-base' : isTouchOptimized ? 'rounded-lg border border-gray-300 bg-white px-2.5 text-base sm:text-[13px]' : 'rounded-lg border border-gray-300 bg-white px-2.5 text-[13px]'} font-medium text-gray-800 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500`;
   const controlFieldClassName = 'h-7 w-full rounded-lg border border-gray-300 bg-white px-2 text-[12px] font-medium text-gray-700 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500';
 
   React.useEffect(() => {
@@ -966,7 +970,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   const referencesField = (
     <div className={isPhoneLayout ? 'space-y-4 rounded-xl border border-gray-200 bg-gray-50 p-3 [&_input:not([type=checkbox])]:h-11 [&_input:not([type=checkbox])]:text-base [&_button]:min-h-11' : 'rounded-xl border border-gray-200 bg-gray-50/70 px-2.5 py-2'}>
       <div className="flex items-center gap-2 px-0.5">
-        <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-500">{language === 'zh' ? '參考音源' : 'Reference'}</div>
+        <div className="text-[11px] font-semibold text-gray-500">{language === 'zh' ? '參考音源' : 'Reference'}</div>
         <div className="h-px flex-1 bg-gray-200" />
       </div>
       <div className={isPhoneLayout ? 'mt-3 space-y-5' : 'mt-1.5 space-y-1.5'}>
@@ -991,7 +995,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
       type="button"
       onClick={() => setIsAdvancedOpen((current) => !current)}
       aria-expanded={isAdvancedOpen}
-      className={`flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 ${isPhoneLayout ? 'min-h-11 text-sm' : 'py-1.5 text-[10px] uppercase tracking-[0.14em]'} font-bold text-gray-500 transition-colors hover:bg-gray-100`}
+      className={`ui-press flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 ${isPhoneLayout ? 'min-h-11 text-sm' : 'py-1.5 text-xs'} font-semibold text-gray-600 transition-colors hover:bg-gray-100`}
     >
       <span className="flex items-center gap-1.5">
         {language === 'zh' ? '進階設定' : 'Advanced'}
@@ -1025,7 +1029,15 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
     return (
       <section ref={panelRef} data-song-metadata-panel data-device-layout={deviceLayout} className={`song-info-form ${isPhoneLayout ? 'song-info-mobile' : 'song-info-popover'}`}>
         {canChangeMapVisibility && <div className="song-info-map-visibility">{mapVisibilityField}</div>}
-        {tabs.length > 1 ? <div role="tablist" aria-label={language === 'zh' ? '歌曲資訊分類' : 'Song information sections'} className="song-info-tabs">
+        {tabs.length > 1 ? <div role="tablist" aria-label={language === 'zh' ? '歌曲資訊分類' : 'Song information sections'} className="song-info-tabs relative">
+          <SlidingSelection
+            index={Math.max(0, tabs.findIndex(tab => tab.id === activeSection))}
+            count={tabs.length}
+            inset={0}
+            gap={isPhoneLayout ? 20 : 16}
+            className="song-info-tab-indicator"
+            style={{ top: 'auto', bottom: -1, height: 2, borderRadius: 2 }}
+          />
           {tabs.map((tab, index) => <button key={tab.id} type="button" role="tab" id={`${metadataInputId}-${tab.id}-tab`}
             aria-selected={activeSection === tab.id} aria-controls={`${metadataInputId}-${tab.id}-panel`}
             tabIndex={activeSection === tab.id ? 0 : -1}
@@ -1040,7 +1052,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
               document.getElementById(`${metadataInputId}-${tabs[next].id}-tab`)?.focus();
             }}>{tab.label}</button>)}
         </div> : null}
-        <div role={tabs.length > 1 ? 'tabpanel' : undefined} id={`${metadataInputId}-${activeSection}-panel`}
+        <div ref={tabContentRef} role={tabs.length > 1 ? 'tabpanel' : undefined} id={`${metadataInputId}-${activeSection}-panel`}
           aria-labelledby={tabs.length > 1 ? `${metadataInputId}-${activeSection}-tab` : undefined}
           className="song-info-tab-content">
           {activeSection === 'details' ? <>

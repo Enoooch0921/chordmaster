@@ -10,14 +10,14 @@ const surfaceTransition = (preference: UiMotionPreference, normal: number, ease:
 });
 
 export const popoverVariants = {
-  hidden: ({ reduced }: UiMotionPreference) => ({ opacity: 0, transform: reduced ? 'none' : 'scale(0.97)' }),
+  hidden: ({ reduced }: UiMotionPreference) => ({ opacity: 0, transform: reduced ? 'none' : 'scale(0.96)' }),
   visible: (preference: UiMotionPreference) => ({ opacity: 1, transform: preference.reduced ? 'none' : 'scale(1)', transition: surfaceTransition(preference, 0.16) }),
-  exit: (preference: UiMotionPreference) => ({ opacity: 0, transform: preference.reduced ? 'none' : 'scale(0.97)', transition: surfaceTransition(preference, 0.125) })
+  exit: (preference: UiMotionPreference) => ({ opacity: 0, transform: preference.reduced ? 'none' : 'scale(0.96)', transition: surfaceTransition(preference, 0.12) })
 };
 export const modalVariants = {
-  hidden: ({ reduced }: UiMotionPreference) => ({ opacity: 0, transform: reduced ? 'none' : 'scale(0.97)' }),
-  visible: (preference: UiMotionPreference) => ({ opacity: 1, transform: preference.reduced ? 'none' : 'scale(1)', transition: surfaceTransition(preference, 0.2) }),
-  exit: (preference: UiMotionPreference) => ({ opacity: 0, transform: preference.reduced ? 'none' : 'scale(0.97)', transition: surfaceTransition(preference, 0.16) })
+  hidden: ({ reduced }: UiMotionPreference) => ({ opacity: 0, transform: reduced ? 'none' : 'translate3d(0, 8px, 0) scale(0.97)' }),
+  visible: (preference: UiMotionPreference) => ({ opacity: 1, transform: preference.reduced ? 'none' : 'translate3d(0, 0px, 0) scale(1)', transition: surfaceTransition(preference, 0.2) }),
+  exit: (preference: UiMotionPreference) => ({ opacity: 0, transform: preference.reduced ? 'none' : 'translate3d(0, 8px, 0) scale(0.97)', transition: surfaceTransition(preference, 0.16) })
 };
 export const backdropVariants = {
   hidden: { opacity: 0 },
@@ -33,4 +33,14 @@ export const notificationVariants = {
   hidden: ({ reduced }: UiMotionPreference) => ({ opacity: 0, transform: reduced ? 'none' : 'translate3d(0, 16px, 0)' }),
   visible: (preference: UiMotionPreference) => ({ opacity: 1, transform: preference.reduced ? 'none' : 'translate3d(0, 0px, 0)', transition: surfaceTransition(preference, 0.2) }),
   exit: (preference: UiMotionPreference) => ({ opacity: 0, transform: preference.reduced ? 'none' : 'translate3d(0, 16px, 0)', transition: surfaceTransition(preference, 0.16) })
+};
+export const topNoticeVariants = {
+  hidden: ({ reduced }: UiMotionPreference) => ({ opacity: 0, transform: reduced ? 'none' : 'translate3d(0, -12px, 0) scale(0.98)' }),
+  visible: (preference: UiMotionPreference) => ({ opacity: 1, transform: preference.reduced ? 'none' : 'translate3d(0, 0px, 0) scale(1)', transition: surfaceTransition(preference, 0.2) }),
+  exit: (preference: UiMotionPreference) => ({ opacity: 0, transform: preference.reduced ? 'none' : 'translate3d(0, -10px, 0) scale(0.98)', transition: surfaceTransition(preference, 0.15) })
+};
+export const floatingActionVariants = {
+  hidden: ({ reduced }: UiMotionPreference) => ({ opacity: 0, transform: reduced ? 'none' : 'translate3d(0, 10px, 0) scale(0.94)' }),
+  visible: (preference: UiMotionPreference) => ({ opacity: 1, transform: preference.reduced ? 'none' : 'translate3d(0, 0px, 0) scale(1)', transition: surfaceTransition(preference, 0.16) }),
+  exit: (preference: UiMotionPreference) => ({ opacity: 0, transform: preference.reduced ? 'none' : 'translate3d(0, 10px, 0) scale(0.94)', transition: surfaceTransition(preference, 0.125) })
 };

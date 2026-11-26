@@ -9,6 +9,8 @@ import { notificationVariants } from '../../lib/uiMotion';
 export default function KeyboardPopover({ label, children }: { label: string; children: React.ReactNode }) {
   const present = useIsPresent();
   const [open, setOpen] = React.useState(false);
+  const [hasOpened, setHasOpened] = React.useState(false);
+  if (open && !hasOpened) setHasOpened(true);
   const [position, setPosition] = React.useState<{ left: number; top: number; width: number } | null>(null);
   const trigger = React.useRef<HTMLButtonElement>(null), panel = React.useRef<HTMLDivElement>(null);
   React.useLayoutEffect(() => {
@@ -49,7 +51,7 @@ export default function KeyboardPopover({ label, children }: { label: string; ch
     <button ref={trigger} type="button" aria-label={label} aria-expanded={open} aria-haspopup="dialog"
       className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-600"
       onClick={() => { setPosition(null); setOpen(value => !value); }}>{label}</button>
-    {createPortal(<AnimatedPopover open={open && present} ready={Boolean(position)} instantExit={!present}
+    {hasOpened && createPortal(<AnimatedPopover animateOnMount open={open && present} ready={Boolean(position)} instantExit={!present}
       panelRef={panel} origin="100% 100%" data-preview-edit-ui data-keyboard-auxiliary data-keyboard-refined
       tabIndex={-1} role="dialog" aria-label={label}
       style={{ position: 'fixed', ...position, zIndex: 6500, visibility: position ? 'visible' : 'hidden' }}

@@ -1,12 +1,12 @@
 .shortcuts-backdrop {
   position: fixed; inset: 0; z-index: 6200; display: grid; place-items: center;
   padding: max(14px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
-  background: rgb(15 23 42 / .39); backdrop-filter: blur(3px);
+  background: rgb(15 23 42 / .42);
 }
 .shortcuts-dialog {
   --shortcut-accent: var(--color-indigo-700);
   position: relative; display: flex; flex-direction: column; width: min(850px, 100%); height: min(556px, 100%);
-  min-width: 0; min-height: 0; overflow: hidden; border-radius: 16px; border: 1px solid var(--color-border);
+  min-width: 0; min-height: 0; overflow: hidden; border-radius: 24px; border: 1px solid var(--color-border);
   background: var(--color-surface); color: var(--color-text); box-shadow: 0 20px 76px rgb(15 23 42 / .2); font-family: var(--font-sans);
 }
 .dark .shortcuts-dialog { --shortcut-accent: var(--color-indigo-300); }
@@ -16,18 +16,21 @@
 }
 .shortcuts-header h2 { display: flex; align-items: center; gap: 12px; margin: 0; font-size: 23px; font-weight: 700; line-height: 1.15; letter-spacing: -.025em; }
 .shortcuts-emblem { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; background: var(--color-success-soft); color: var(--shortcut-accent); }
-.shortcuts-close { position: absolute; right: 12px; top: 15px; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 8px; color: var(--color-text-muted); cursor: pointer; z-index: 1; }
-.shortcuts-close:hover, .shortcuts-categories button:hover { background: var(--color-surface-sunken); }
+.shortcuts-close { position: absolute; right: 12px; top: 15px; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 9999px; color: var(--color-text-muted); cursor: pointer; z-index: 1; transition: background-color 140ms ease-out, color 140ms ease-out; }
+.shortcuts-close:hover, .shortcuts-categories button:hover { background: var(--color-surface-sunken); color: var(--color-text); }
 .shortcuts-dialog :focus-visible { outline: 2px solid var(--shortcut-accent); outline-offset: -2px; }
-.shortcuts-search { display: flex; align-items: center; gap: 8px; padding: 0 10px; width: min(250px, 45%); height: 38px; border: 1px solid var(--color-border-strong); border-radius: 7px; background: var(--color-surface-muted); color: var(--color-text-muted); cursor: text; }
+.shortcuts-search { display: flex; align-items: center; gap: 8px; padding: 0 10px; width: min(250px, 45%); height: 38px; border: 1px solid var(--color-border-strong); border-radius: 10px; background: var(--color-surface-muted); color: var(--color-text-muted); cursor: text; }
 .shortcuts-search:focus-within { outline: 2px solid var(--shortcut-accent); outline-offset: -1px; }
 .shortcuts-search input { flex: 1; min-width: 0; height: 100%; outline: 0; font: inherit; font-size: 14px; color: var(--color-text); }
+.shortcuts-search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 .shortcuts-search input:focus-visible { outline: 0; }
+.shortcuts-search-clear { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 9999px; color: var(--color-text-muted); cursor: pointer; flex: none; transition: background-color 140ms ease-out, color 140ms ease-out; }
+.shortcuts-search-clear:hover { background: var(--color-surface-sunken); color: var(--color-text); }
 .shortcuts-search svg, .shortcuts-categories svg { flex: none; }
 .shortcuts-search input::placeholder { color: var(--color-text-muted); }
 .shortcuts-body { display: flex; flex: 1; min-height: 0; }
 .shortcuts-categories { flex: 0 0 180px; padding: 18px 10px; background: var(--color-surface-muted); border-right: 1px solid var(--color-border); overflow-y: auto; }
-.shortcuts-categories button { display: flex; align-items: center; gap: 10px; padding: 8px 12px; width: 100%; min-height: 43px; margin-bottom: 2px; border-radius: 7px; text-align: start; font-size: 14px; line-height: 1.3; color: var(--color-text-muted); cursor: pointer; }
+.shortcuts-categories button { display: flex; align-items: center; gap: 10px; padding: 8px 12px; width: 100%; min-height: 43px; margin-bottom: 2px; border-radius: 7px; text-align: start; font-size: 14px; line-height: 1.3; color: var(--color-text-muted); cursor: pointer; transition: background-color 140ms ease-out, color 140ms ease-out; }
 .shortcuts-categories button[aria-pressed="true"] { background: var(--color-success-soft); color: var(--shortcut-accent); font-weight: 650; }
 .shortcuts-picker { display: none; }
 .shortcuts-content { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 25px 26px; }
@@ -43,7 +46,7 @@
 .shortcuts-row dd { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px 10px; margin: 0; }
 .shortcuts-combo { display: inline-flex; align-items: center; gap: 3px; }
 .shortcuts-combo kbd { display: inline-grid; place-items: center; min-width: 24px; padding: 1px 6px; min-height: 23px; background: var(--color-surface-muted); border: 1px solid var(--color-border-strong); border-radius: 5px; box-shadow: 0 1px 0 var(--color-border); color: var(--color-text); font: 550 12px/1.4 ui-monospace, monospace; white-space: nowrap; }
-.shortcuts-result { margin: 0 0 12px; font-size: 13px; color: var(--color-text-muted); }
+.shortcuts-result { margin: 0 0 12px; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--color-text-muted); }
 .shortcuts-empty { padding: 35px 0; display: grid; justify-items: start; gap: 12px; color: var(--color-text-muted); }
 .shortcuts-empty button:hover { text-decoration-thickness: 2px; }
 .shortcuts-empty button { min-height: 44px; color: var(--shortcut-accent); text-decoration: underline; cursor: pointer; }

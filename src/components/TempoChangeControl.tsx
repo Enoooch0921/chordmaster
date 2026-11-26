@@ -70,8 +70,8 @@ export default function TempoChangeControl({ value, language, label, onChange }:
   return <div className="inline-flex shrink-0" data-tempo-change-control onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); cancel(); } }}>
     <button ref={triggerRef} type="button" aria-label={zh ? `設定${label}` : `Set ${label.toLowerCase()}`} title={label} aria-haspopup="dialog" aria-expanded={open}
       onClick={() => { if (open) close(); else { closing.current = false; instantExit.current = false; setHasOpened(true); setDraft(formatTempoBpm(value.tempo)); setError(false); setOpen(true); } }}
-      className={`flex h-9 min-w-[92px] items-center justify-between gap-2 rounded-xl border bg-white px-2.5 text-sm font-semibold ${open ? 'border-indigo-500 ring-2 ring-indigo-500' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}>
-      <span>♩ {display}</span><ChevronDown size={14} className="text-gray-500" />
+      className={`ui-press flex h-9 min-w-[92px] items-center justify-between gap-2 rounded-xl border bg-white px-2.5 text-sm font-semibold transition-colors ${open ? 'border-indigo-500 ring-2 ring-indigo-500' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}>
+      <span>♩ {display}</span><ChevronDown size={14} className={`text-gray-500 ui-motion-chevron ${open ? 'rotate-180' : ''}`} />
     </button>
     {hasOpened && typeof document !== 'undefined' && createPortal(
       <AnimatedPopover animateOnMount open={open && present} instantExit={!present || instantExit.current} ready={isPositioned} panelRef={panelRef} origin={transformOrigin} role="dialog" aria-label={`${label}${zh ? '設定' : ' settings'}`} data-preview-edit-ui data-preview-picker-popover data-placement={placement} style={panelStyle}

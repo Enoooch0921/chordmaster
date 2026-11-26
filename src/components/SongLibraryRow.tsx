@@ -3,6 +3,7 @@ import { Archive, ArchiveRestore, Copy, Download, Star, Trash2, Upload } from 'l
 import type { AppLanguage, StoredSong } from '../types';
 import type { SongEditorPresence } from '../lib/songEditingPresence';
 import { getUiCopy } from '../constants/i18n';
+import { UI_EASE_OUT } from '../lib/uiMotion';
 import { getSongLibraryIdentity, getSongLibraryMeta } from '../lib/songLibraryPresentation';
 import { currentKeyMode, formatKeyName } from '../utils/keyMode';
 import { ManagementActions } from './ProjectManagementPanel';
@@ -125,7 +126,16 @@ export default memo(function SongLibraryRow({
         )}
         {!isLibraryEditing && (
           <div className="song-library-row-actions">
-            <button type="button" className="song-library-favorite" aria-pressed={isFavorite} aria-label={language === 'zh' ? `${isFavorite ? '取消收藏' : '收藏'}：${title}` : `${isFavorite ? 'Unfavorite' : 'Favorite'}: ${title}`} onClick={() => onAction('toggle-favorite', item.id)}><Star size={17} fill={isFavorite ? 'currentColor' : 'none'} /></button>
+            <button type="button" className="song-library-favorite" aria-pressed={isFavorite} aria-label={language === 'zh' ? `${isFavorite ? '取消收藏' : '收藏'}：${title}` : `${isFavorite ? 'Unfavorite' : 'Favorite'}: ${title}`} onClick={event => {
+              const star = event.currentTarget.querySelector('svg');
+              for (const animation of star?.getAnimations?.() ?? []) animation.cancel();
+              if (!isFavorite && event.detail > 0 && window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches) {
+                star?.animate?.([{ transform: 'scale(1)' }, { transform: 'scale(1.12)' }, { transform: 'scale(1)' }], {
+                  duration: 150, easing: `cubic-bezier(${UI_EASE_OUT.join(',')})`
+                });
+              }
+              onAction('toggle-favorite', item.id);
+            }}><Star size={17} fill={isFavorite ? 'currentColor' : 'none'} aria-hidden="true" /></button>
             {canEditTeamSongs && <ManagementActions label={language === 'zh' ? `歌曲操作：${title}` : `Song actions: ${title}`} actions={[
               ...(hasLinkedTeamUpdate ? [{ label: language === 'zh' ? '同步團隊最新版' : 'Sync latest team version', icon: <Download size={16} />, run: () => onAction('sync-team', item.id) }] : []),
               ...(canCopyPersonalSongsToTeam && !item.archivedAt ? [{ label: language === 'zh' ? '複製到團隊…' : 'Copy to team…', icon: <Upload size={16} />, run: () => onAction('copy-to-team', item.id), disabled: isImportingPersonalSongs }] : []),

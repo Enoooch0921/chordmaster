@@ -240,6 +240,7 @@
   --color-success-soft: #DAF1E5;
   --color-danger: #e11d48;
   --color-danger-soft: #ffe4e6;
+  --color-focus-ring: #2E8C5E;
 }
 
 @layer base {
@@ -262,6 +263,7 @@
     --color-success-soft: #1A5234;
     --color-danger: #f43f5e;
     --color-danger-soft: #4c1024;
+    --color-focus-ring: #5EBD8F;
   }
 
   html,
@@ -276,6 +278,21 @@
     @apply antialiased;
     background-color: var(--color-surface-muted);
     color: var(--color-text);
+  }
+
+  ::selection {
+    background-color: color-mix(in srgb, var(--color-indigo-500) 24%, transparent);
+    color: inherit;
+  }
+
+  :where(*:not([data-print-preview]):not([data-print-preview] *):not(.no-scrollbar)) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+
+  :where(button, a, summary, input, select, textarea, [role="button"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]):focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
   }
 }
 
@@ -672,18 +689,174 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
   [data-ui-input="pointer"] [data-native-dialog-motion] button:active:not(:disabled) { transform: none; opacity: 0.8; }
   .ui-details::details-content { transition-property: opacity, content-visibility; }
 }
-[data-ui-input="pointer"] .ui-press {
+[data-ui-input="pointer"] .ui-press,
+[data-ui-input="pointer"] :is(
+  .song-library-button,
+  .song-library-favorite,
+  .pm-back,
+  .pm-new-button,
+  .pm-icon-button,
+  .pm-text-button,
+  .pm-menu-item,
+  .setlist-browser-icon,
+  .setlist-project-members,
+  .slw-toolbar button:not(.slw-modes > button),
+  .slw-navigation button,
+  .personal-notes-tools button,
+  .tempo-stepper button,
+  .tempo-footer button,
+  .tempo-original button,
+  .map-editor-body button:not([data-map-step-id]),
+  .map-editor-footer button,
+  .reader-audition-toggle,
+  .reader-audition-close,
+  .reader-start,
+  .reader-bar-stepper button,
+  .practice-cues button,
+  .practice-apply,
+  .practice-stepper button,
+  .practice-section-rail button,
+  .practice-now,
+  .shortcuts-close,
+  .shortcuts-categories button,
+  .app-update-notice button,
+  .source-sync-button,
+  .source-sync-close,
+  .drummer-entry
+):not(.drummer-tap):not(.drummer-play):not(.reference-tap):not([data-performance-turn-area]) {
   transition-property: transform, opacity, background-color, border-color, color;
   transition-duration: var(--ui-release-duration);
   transition-timing-function: var(--ease-ui-out);
 }
-[data-ui-input="pointer"] .ui-press:active:not(:disabled) {
+[data-ui-input="pointer"] .ui-press:active:not(:disabled),
+[data-ui-input="pointer"] :is(
+  .song-library-button,
+  .song-library-favorite,
+  .pm-back,
+  .pm-new-button,
+  .pm-icon-button,
+  .pm-text-button,
+  .pm-menu-item,
+  .setlist-browser-icon,
+  .setlist-project-members,
+  .slw-toolbar button:not(.slw-modes > button),
+  .slw-navigation button,
+  .personal-notes-tools button,
+  .tempo-stepper button,
+  .tempo-footer button,
+  .tempo-original button,
+  .map-editor-body button:not([data-map-step-id]),
+  .map-editor-footer button,
+  .reader-audition-toggle,
+  .reader-audition-close,
+  .reader-start,
+  .reader-bar-stepper button,
+  .practice-cues button,
+  .practice-apply,
+  .practice-stepper button,
+  .practice-section-rail button,
+  .practice-now,
+  .shortcuts-close,
+  .shortcuts-categories button,
+  .app-update-notice button,
+  .source-sync-button,
+  .source-sync-close,
+  .drummer-entry
+):active:not(:disabled):not(.drummer-tap):not(.drummer-play):not(.reference-tap):not([data-performance-turn-area]) {
   transform: scale(0.97);
   transition-duration: var(--ui-press-duration);
 }
+[data-ui-disclosure][data-disclosure-expand="true"] {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 200ms var(--ease-ui-out);
+}
+[data-ui-disclosure][data-disclosure-expand="true"][data-disclosure-state="entering"],
+[data-ui-disclosure][data-disclosure-expand="true"][data-disclosure-state="exiting"] {
+  grid-template-rows: 0fr;
+}
+[data-ui-disclosure][data-disclosure-expand="true"][data-disclosure-state="exiting"] {
+  transition-duration: 150ms;
+}
+[data-ui-disclosure][data-disclosure-expand="true"] > .ui-disclosure-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+[data-ui-input="keyboard"] [data-ui-disclosure][data-disclosure-expand="true"] {
+  transition: none;
+}
 @media (prefers-reduced-motion: reduce) {
-  [data-ui-input="pointer"] .ui-press { transition-property: opacity, background-color, border-color, color; }
-  [data-ui-input="pointer"] .ui-press:active:not(:disabled) { transform: none; opacity: 0.8; }
+  [data-ui-input="pointer"] .ui-press,
+  [data-ui-input="pointer"] :is(
+    .song-library-button,
+    .song-library-favorite,
+    .pm-back,
+    .pm-new-button,
+    .pm-icon-button,
+    .pm-text-button,
+    .pm-menu-item,
+    .setlist-browser-icon,
+    .setlist-project-members,
+    .slw-toolbar button:not(.slw-modes > button),
+    .slw-navigation button,
+    .personal-notes-tools button,
+    .tempo-stepper button,
+    .tempo-footer button,
+    .tempo-original button,
+    .map-editor-body button:not([data-map-step-id]),
+    .map-editor-footer button,
+    .reader-audition-toggle,
+    .reader-audition-close,
+    .reader-start,
+    .reader-bar-stepper button,
+    .practice-cues button,
+    .practice-apply,
+    .practice-stepper button,
+    .practice-section-rail button,
+    .practice-now,
+    .shortcuts-close,
+    .shortcuts-categories button,
+    .app-update-notice button,
+    .source-sync-button,
+    .source-sync-close,
+    .drummer-entry
+  ) { transition-property: opacity, background-color, border-color, color; }
+  [data-ui-input="pointer"] .ui-press:active:not(:disabled),
+  [data-ui-input="pointer"] :is(
+    .song-library-button,
+    .song-library-favorite,
+    .pm-back,
+    .pm-new-button,
+    .pm-icon-button,
+    .pm-text-button,
+    .pm-menu-item,
+    .setlist-browser-icon,
+    .setlist-project-members,
+    .slw-toolbar button:not(.slw-modes > button),
+    .slw-navigation button,
+    .personal-notes-tools button,
+    .tempo-stepper button,
+    .tempo-footer button,
+    .tempo-original button,
+    .map-editor-body button:not([data-map-step-id]),
+    .map-editor-footer button,
+    .reader-audition-toggle,
+    .reader-audition-close,
+    .reader-start,
+    .reader-bar-stepper button,
+    .practice-cues button,
+    .practice-apply,
+    .practice-stepper button,
+    .practice-section-rail button,
+    .practice-now,
+    .shortcuts-close,
+    .shortcuts-categories button,
+    .app-update-notice button,
+    .source-sync-button,
+    .source-sync-close,
+    .drummer-entry
+  ):active:not(:disabled) { transform: none; opacity: 0.8; }
+  [data-ui-disclosure][data-disclosure-expand="true"] { grid-template-rows: 1fr !important; transition: none; }
 }
 
 .ui-anchored-panel { max-height: inherit; max-width: inherit; overflow-y: auto; overscroll-behavior: contain; }

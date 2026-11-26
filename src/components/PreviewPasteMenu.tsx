@@ -49,7 +49,7 @@ export default function PreviewPasteMenu({ language, count, left, top, onChoose,
     };
   }, [present]);
   return <AnimatedPopover open={present} animateOnMount propagate panelRef={menuRef} origin="0% 0%" role="menu" aria-label={language === 'zh' ? '選擇貼上內容' : 'Choose what to paste'} data-preview-edit-ui data-preview-paste-menu
-    shellClassName="fixed z-[5400]" className="w-[280px] max-w-[calc(100vw-16px)] rounded-xl bg-white p-2 shadow-[0_18px_48px_rgba(15,23,42,0.22)]"
+    shellClassName="fixed z-[5400]" className="w-[280px] max-w-[calc(100vw-16px)] rounded-xl border border-gray-200 bg-white p-2 shadow-[0_18px_48px_rgba(15,23,42,0.22)]"
     style={{ left: Math.min(Math.max(8, left), Math.max(8, window.innerWidth - 288)), top: Math.min(Math.max(8, top), Math.max(8, window.innerHeight - 148)) }}
     onKeyDown={event => {
       event.stopPropagation();

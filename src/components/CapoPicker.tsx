@@ -44,6 +44,8 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
   const panelRef = React.useRef<HTMLDivElement>(null);
   const optionRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
   const [isOpen, setIsOpen] = React.useState(false);
+  const [hasOpened, setHasOpened] = React.useState(false);
+  if (isOpen && !hasOpened) setHasOpened(true);
   const instantExit = React.useRef(false);
   const focusFrame = React.useRef<number | null>(null);
   const panelId = React.useId();
@@ -157,7 +159,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
         type="button"
         disabled={disabled}
         onClick={() => { if (!disabled) { instantExit.current = false; setIsOpen(open => !open); } }}
-        className={`ui-press flex items-center justify-between gap-2 border border-gray-300 bg-white text-left outline-none transition-colors ${
+        className={`ui-press flex items-center justify-between gap-2 border border-gray-300 bg-white text-left outline-none transition-colors focus-visible:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-500/25 ${
           isCompactTrigger
             ? 'h-9 min-w-[82px] rounded-lg px-2.5'
             : 'h-10 min-w-[104px] rounded-xl px-3'
@@ -165,28 +167,28 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
           disabled
             ? 'cursor-not-allowed text-gray-400'
             : isOpen
-              ? 'border-indigo-500 ring-2 ring-indigo-500'
+              ? 'border-indigo-500 ring-2 ring-indigo-500/25'
               : 'text-gray-700 hover:border-gray-400'
         } ${buttonClassName}`}
         aria-haspopup="dialog"
         aria-expanded={isOpen}
         aria-controls={isOpen ? panelId : undefined}
       >
-        <span className={`min-w-0 truncate ${isCompactTrigger ? 'text-[13px]' : 'text-sm'} font-semibold text-gray-800 ${valueTextClassName}`}>
+        <span className={`min-w-0 truncate ${isCompactTrigger ? 'text-[13px]' : 'text-sm'} font-semibold tabular-nums text-gray-800 ${valueTextClassName}`}>
           {triggerLabel ?? value}{showPlayKey ? <> <span className="text-gray-400">({playKey})</span></> : null}
         </span>
         <ChevronDown size={triggerIconSize} className={`shrink-0 text-gray-500 ui-motion-chevron ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
-      {typeof document !== 'undefined' && createPortal(
-        <AnimatedPopover open={isOpen} ready={isPositioned} instantExit={instantExit.current} origin={transformOrigin}
+      {hasOpened && typeof document !== 'undefined' && createPortal(
+        <AnimatedPopover animateOnMount open={isOpen} ready={isPositioned} instantExit={instantExit.current} origin={transformOrigin}
           id={panelId} role="dialog" aria-label={label}
           panelRef={panelRef}
-          className={`ui-anchored-panel ${touchOptimized ? 'w-[248px] p-3' : 'w-[132px] p-2'} rounded-[20px] border border-gray-200 bg-white shadow-xl`}
+          className={`ui-anchored-panel ${touchOptimized ? 'w-[248px] p-3' : 'w-[132px] p-2'} rounded-2xl border border-gray-200 bg-white shadow-xl`}
           style={panelStyle}
           data-placement={placement}
         >
-          <div className="mb-2 px-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">
+          <div className="mb-2 px-1.5 text-[11px] font-semibold text-gray-500">
             {label}
           </div>
           <div className={`${touchOptimized ? 'grid grid-cols-2 gap-1' : 'space-y-0.5'} transition-opacity ${isPositioned ? 'opacity-100' : 'opacity-0'}`}>
@@ -216,7 +218,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
                       : 'hover:bg-gray-50'
                   }`}
                 >
-                  <span className={`inline-flex min-w-[1.15em] justify-end text-[13px] font-bold ${isSelected && useIndigo ? 'text-indigo-700' : 'text-gray-700'}`}>
+                  <span className={`inline-flex min-w-[1.15em] justify-end text-[13px] font-bold tabular-nums ${isSelected && useIndigo ? 'text-indigo-700' : 'text-gray-700'}`}>
                     {capo}
                   </span>
                   <span className={`ml-1.5 text-[13px] font-semibold ${isSelected && useIndigo ? 'text-indigo-700' : optionPlayKey.includes('#') || optionPlayKey.includes('b') ? 'text-gray-400' : 'text-gray-900'}`}>

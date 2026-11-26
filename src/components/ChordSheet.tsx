@@ -30,7 +30,6 @@ import React from 'react';
 import SongTitle from './SongTitle';
 import { getChartEditedAt } from '../lib/chartRevision';
 import { createPortal } from 'react-dom';
-import { motion } from 'motion/react';
 import { Song, Section, Bar, Key, AppLanguage, NavigationMarker, BarLabelLane } from '../types';
 import { getTransposeOffset, transposeChordForDisplay, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey, transposeKeyPreferFlats, normalizeKeySpelling, getParenthesizedChordInner } from '../utils/musicUtils';
 import { getChordFontFamily } from '../constants/chordFonts';
@@ -2457,13 +2456,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
               }
               if (row.kind === 'closed-filler') {
                 return (
-                  <motion.div
+                  <div
                     key={row.closedFillerId || `closed-${pIdx}-${rIdx}`}
                     data-preview-closed-page-row
                     data-preview-layout-weight={row.layoutWeight}
                     className="relative flex w-full min-h-0 flex-1 rounded-lg"
                     style={{ flexGrow: row.layoutWeight || 1 }}
-                    initial={false}
                   >
                     <div data-preview-bar-gutter className="relative w-16 sm:w-20 [--bar-gutter-width:64px] sm:[--bar-gutter-width:80px] shrink-0"
                       style={{ width: 'var(--pickup-gutter-width, var(--bar-gutter-width))' }} />
@@ -2471,7 +2469,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                       data-preview-invisible-page-spacer
                       className="flex-1 min-h-0"
                     />
-                  </motion.div>
+                  </div>
                 );
               }
               const sectionWrittenKey = sectionStartKeys[row.sIdx] || song.originalKey;
@@ -2580,7 +2578,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
               );
 
               return (
-                <motion.div
+                <div
                   key={`${row.sIdx}-${section?.id || 'section'}-${row.kind}-${row.startBIdx}`}
                   data-preview-section-id={section?.id || ''}
                   data-preview-add-choice-row={row.kind === 'add-choice' ? 'true' : undefined}
@@ -2596,19 +2594,16 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                     ...(row.extraRhythmRows || row.extraJianpuRows || row.extraChordPassRows || row.bars.some(bar=>bar?.chordTimingUnspecified) ? {
                     minHeight: notationRowHeight,
                     flexGrow: row.layoutWeight
-                  } : {}) }}
-                  initial={false}
-                  animate={{
+                  } : {}),
                     backgroundColor: isHighlighted
                       ? getFlashColor(colors.accent)
                       : isActiveSection
                         ? activeTone.fill
                         : 'rgba(255, 255, 255, 0)',
-                    boxShadow: isActiveSection ? `inset 0 0 0 2px ${activeTone.stroke}` : 'inset 0 0 0 0 rgba(0, 0, 0, 0)'
-                  }}
-                  transition={{
-                    backgroundColor: { duration: suppressSectionTransitions ? 0 : (isHighlighted ? 0.2 : 0.25) },
-                    boxShadow: { duration: suppressSectionTransitions ? 0 : 0.2 }
+                    boxShadow: isActiveSection ? `inset 0 0 0 2px ${activeTone.stroke}` : 'inset 0 0 0 0 rgba(0, 0, 0, 0)',
+                    transition: suppressSectionTransitions
+                      ? 'none'
+                      : `background-color ${isHighlighted ? '200ms' : '250ms'} var(--ease-ui-out), box-shadow 200ms var(--ease-ui-out)`
                   }}
                   className={`relative flex w-full rounded-lg ${
                     barRowCount === 3
@@ -4060,7 +4055,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                   });
                   })()}
                 </div>
-              </motion.div>
+              </div>
             );
           })}
 

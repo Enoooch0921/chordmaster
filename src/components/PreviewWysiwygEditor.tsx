@@ -1,6 +1,8 @@
 import { applySongVersionText, getSongVersionText as getVersionValue } from '../lib/songCredits';
-import { motion } from 'motion/react';
+import { motion, useIsPresent } from 'motion/react';
 import { useBottomSheetMotion } from '../hooks/useBottomSheetMotion';
+import { useUiMotion } from '../hooks/useUiMotion';
+import { popoverVariants } from '../lib/uiMotion';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { currentKeyMode } from '../utils/keyMode';
 import type { TonalMode } from '../types';
@@ -424,9 +426,11 @@ export default function PreviewWysiwygEditor({
     };
   }, [isTouchLayout, usesMetadataPanel]);
 
+  const present = useIsPresent();
+  const uiMotion = useUiMotion();
   const sheetMotion = useBottomSheetMotion(panelRef, usesMetadataPanel && isTouchLayout, () => finishClose());
 
-  useModalFocus(usesMetadataPanel && isTouchLayout && sheetMotion.mounted, panelRef);
+  useModalFocus(present && usesMetadataPanel && isTouchLayout && sheetMotion.mounted, panelRef);
 
   const finishClose = () => {
     if (finishedRef.current) {
@@ -581,15 +585,28 @@ export default function PreviewWysiwygEditor({
   const versionListId = metadataSuggestions?.versions.length ? `${editorInputId}-versions` : undefined;
   const translatorListId = metadataSuggestions?.translators.length ? `${editorInputId}-translators` : undefined;
 
+  const desktopPopoverMotion = (fullMetadata: boolean) => (!isTouchLayout && fullMetadata) ? {
+    custom: uiMotion,
+    variants: popoverVariants,
+    initial: uiMotion.instant ? false as const : 'hidden' as const,
+    animate: 'visible' as const,
+    exit: 'exit' as const
+  } : sheetMotion.motionProps;
   const chrome = (children: React.ReactNode, title: string, fullMetadata = false) => (
     <motion.div
-      {...sheetMotion.motionProps}
+      {...desktopPopoverMotion(fullMetadata)}
       ref={sheetMotion.attach}
+      inert={!present ? true : undefined}
+      aria-hidden={!present ? true : undefined}
       data-song-info-dialog={fullMetadata ? deviceLayout : undefined}
       role={fullMetadata ? 'dialog' : undefined}
       aria-modal={fullMetadata && isTouchLayout ? true : undefined}
       aria-label={fullMetadata ? title : undefined}
-      style={fullMetadata ? { maxHeight: 'inherit' } : undefined}
+      style={{
+        ...(fullMetadata ? { maxHeight: 'inherit' } : {}),
+        ...(!isTouchLayout && fullMetadata ? { transformOrigin: '100% 0%' } : {}),
+        ...(!present ? { pointerEvents: 'none' as const } : {})
+      }}
       className={`flex min-h-0 flex-col overflow-hidden border border-gray-200 bg-white shadow-2xl ${deviceLayout === 'phone' && fullMetadata ? 'h-full' : ''} ${isTouchLayout ? 'rounded-t-[24px] sm:rounded-[24px]' : 'rounded-xl'}`}
       onPointerDown={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}

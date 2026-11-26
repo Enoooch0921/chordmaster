@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
+import { AnimatePresence } from 'motion/react';
 import { Check, ChevronDown, Eraser, Eye, EyeOff, Highlighter, LockKeyhole, Pencil, Redo2, Undo2 } from 'lucide-react';
 import type { AppLanguage } from '../types';
 import PersonalNotesPage from './PersonalNotesPage';
 import { NOTE_COLORS, type NoteSurface, type NoteTool } from '../lib/personalNotes';
 import { usePersonalNotes } from '../lib/personalNotesStore';
 import type { NoteShapeFeedback } from '../lib/noteShapes';
+import { useUiMotion } from '../hooks/useUiMotion';
+import { popoverVariants } from '../lib/uiMotion';
+import { AnimatedDisclosure, PresenceSurface } from './ui/InteractionMotion';
 import './PersonalNotes.css';
 
 export interface PersonalNotesOptions {
@@ -44,6 +48,7 @@ export default function PersonalNotes({ root, noteOwner, noteSongId, notesActive
   const [shapeEnabled, setShapeEnabled] = useState(true);
   const [shape, setShape] = useState<NoteShapeFeedback>(null);
   const zh = language === 'zh';
+  const uiMotion = useUiMotion();
   useLayoutEffect(() => {
     const container = root.current;
     if (!container) return;
@@ -95,35 +100,42 @@ export default function PersonalNotes({ root, noteOwner, noteSongId, notesActive
       shapeEnabled={shapeEnabled} onShape={setShape} />, page, String(index)))}
     {notesActive && toolsHost && (open || notesPerformance || notesOpen === undefined) && createPortal(<div className="personal-notes-tools" data-personal-notes-tools data-preview-edit-ui data-preview-only-control
       data-notes-open={open || undefined} onPointerDown={event => event.stopPropagation()} onTouchStart={event => event.stopPropagation()}>
-      {!open ? <button type="button" className="personal-notes-launch" onClick={() => { setVisible(true); setOpen(true); }}>
-        <Pencil size={17} /><span>{zh ? '個人筆記' : 'My notes'}</span>{strokes.length > 0 && <span className="personal-notes-dot" />}
-      </button> : <>
+      <AnimatePresence mode="popLayout" initial={false} custom={uiMotion}>
+      {!open ? <PresenceSurface key="launch" custom={uiMotion} variants={popoverVariants} initial={uiMotion.instant ? false : 'hidden'} animate="visible" exit="exit" style={{ transformOrigin: '100% 100%' }}>
+        <button type="button" className="personal-notes-launch" onClick={() => { setVisible(true); setOpen(true); }}>
+          <Pencil size={17} /><span>{zh ? '個人筆記' : 'My notes'}</span>{strokes.length > 0 && <span className="personal-notes-dot" />}
+        </button>
+      </PresenceSurface> : <PresenceSurface key="toolbar" custom={uiMotion} variants={popoverVariants} initial={uiMotion.instant ? false : 'hidden'} animate="visible" exit="exit" style={{ transformOrigin: '100% 100%' }}>
         <div className="personal-notes-caption"><span><LockKeyhole size={12} />{zh ? '僅自己可見' : 'Only you'}</span>
           <button type="button" className="personal-notes-status" onClick={() => { void store.sync(); }} data-error={state.status === 'error' || undefined}>{status}</button></div>
         <div role="toolbar" aria-label={zh ? '個人手寫筆記' : 'Personal handwriting'} className="personal-notes-actions">
           {button(zh ? '畫筆' : 'Pen', <Pencil size={19} />, () => { setTool('pen'); setVisible(true); }, tool === 'pen')}
           {button(zh ? '螢光筆' : 'Highlighter', <Highlighter size={19} />, () => { setTool('highlighter'); setColor('#d97706'); setVisible(true); }, tool === 'highlighter')}
           {button(zh ? '橡皮擦' : 'Eraser', <Eraser size={19} />, () => { setTool('eraser'); setVisible(true); }, tool === 'eraser')}
-          {button(zh ? '筆色與粗細' : 'Ink and width', <><i style={{ background: color }} /><ChevronDown size={12} /></>, () => setOptions(!options), options)}
+          {button(zh ? '筆色與粗細' : 'Ink and width', <><i style={{ background: color }} /><ChevronDown size={12} className={`ui-motion-chevron ${options ? 'rotate-180' : ''}`} /></>, () => setOptions(!options), options)}
           <span className="personal-notes-separator" />
           {button(zh ? '復原筆記' : 'Undo note', <Undo2 size={19} />, () => store.undo(surface), undefined, !state.undo[surface])}
           {button(zh ? '重做筆記' : 'Redo note', <Redo2 size={19} />, () => store.redo(surface), undefined, !state.redo[surface])}
           {button(visible ? (zh ? '隱藏筆記' : 'Hide notes') : (zh ? '顯示筆記' : 'Show notes'), visible ? <Eye size={19} /> : <EyeOff size={19} />, () => setVisible(!visible), !visible)}
           {button(zh ? '完成筆記' : 'Done', <Check size={19} />, () => { setOpen(false); setOptions(false); })}
         </div>
-        {options && <><div className="personal-notes-options">
-          <div aria-label={zh ? '筆色' : 'Ink color'}>{NOTE_COLORS.map((value, index) => button(
-            (zh ? ['黑色', '紅色', '藍色', '綠色', '橙色'] : ['Black', 'Red', 'Blue', 'Green', 'Orange'])[index],
-            <i style={{ background: value }} />, () => setColor(value), color === value))}</div>
-          <div aria-label={zh ? '筆畫粗細' : 'Stroke width'}>{[1.5, 2.5, 4].map((value, index) => button(
-            (zh ? ['細筆', '中筆', '粗筆'] : ['Thin', 'Medium', 'Thick'])[index], <span style={{ height: value, width: 15, background: 'currentColor', borderRadius: 5 }} />,
-            () => setWidth(value), width === value))}</div>
-        </div><label className="personal-notes-shape-toggle"><input type="checkbox" checked={shapeEnabled} onChange={event => setShapeEnabled(event.target.checked)} />{zh ? '停筆修形' : 'Hold to tidy shapes'}</label></>}
+        <AnimatedDisclosure open={options}>
+          <div className="personal-notes-options">
+            <div aria-label={zh ? '筆色' : 'Ink color'}>{NOTE_COLORS.map((value, index) => button(
+              (zh ? ['黑色', '紅色', '藍色', '綠色', '橙色'] : ['Black', 'Red', 'Blue', 'Green', 'Orange'])[index],
+              <i style={{ background: value }} />, () => setColor(value), color === value))}</div>
+            <div aria-label={zh ? '筆畫粗細' : 'Stroke width'}>{[1.5, 2.5, 4].map((value, index) => button(
+              (zh ? ['細筆', '中筆', '粗筆'] : ['Thin', 'Medium', 'Thick'])[index], <span style={{ height: value, width: 15, background: 'currentColor', borderRadius: 5 }} />,
+              () => setWidth(value), width === value))}</div>
+          </div>
+          <label className="personal-notes-shape-toggle"><input type="checkbox" checked={shapeEnabled} onChange={event => setShapeEnabled(event.target.checked)} />{zh ? '停筆修形' : 'Hold to tidy shapes'}</label>
+        </AnimatedDisclosure>
         <p className="personal-notes-hint" aria-live="polite">{shape === 'holding' ? (zh ? '正在修形，先別抬筆…' : 'Tidying · keep the pen down…')
           : shape === 'unrecognized' ? (zh ? '未辨識形狀，保留原筆跡' : 'Shape not recognized · kept your drawing')
           : shape ? (zh ? `已修成${{ line: '直線', ellipse: '圓圈', rectangle: '方框', triangle: '三角形', diamond: '菱形', pentagon: '五邊形', hexagon: '六邊形', star: '五角星', arrow: '箭頭' }[shape]}` : `Tidied ${shape}`)
           : zh ? (shapeEnabled ? '畫完不抬筆，停住修形 · 手指滑動' : '用筆書寫 · 手指滑動／縮放') : (shapeEnabled ? 'Draw, then hold the pen down to tidy' : 'Use the pen to write · fingers to navigate')}</p>
-      </>}
+      </PresenceSurface>}
+      </AnimatePresence>
     </div>, toolsHost)}
   </>;
 }

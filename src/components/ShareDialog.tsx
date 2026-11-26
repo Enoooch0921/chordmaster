@@ -38,8 +38,8 @@ export default function ShareDialog({ language, title, url, contacts, sharing, o
     <ResponsiveDialog title={title} closeLabel={zh ? '關閉分享' : 'Close sharing'} busy={sharing} onClose={onClose}>
       {contacts ? (
         <nav aria-label={zh ? '分享方式' : 'Sharing method'} className="shrink-0 border-b border-gray-100 px-5 py-3">
-          <div className="relative grid w-full grid-cols-2 gap-1 rounded-xl"><SlidingSelection index={view === 'link' ? 0 : 1} count={2} inset={0} gap={4} className="bg-indigo-50 dark:bg-indigo-950" style={{ borderRadius: 12 }}/>
-          {(['link', 'contacts'] as const).map((tab) => <button key={tab} type="button" aria-pressed={view === tab} onClick={() => setView(tab)} className={`ui-press relative inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold ${view === tab ? 'text-indigo-700 dark:text-indigo-200' : 'text-gray-500 hover:bg-gray-50'}`}>{tab === 'link' ? <Link size={16} /> : <Users size={16} />}{tab === 'link' ? (zh ? '分享連結' : 'Link') : (zh ? '邀請聯絡人' : 'Contacts')}</button>)}
+          <div className="relative grid w-full grid-cols-2 gap-1 rounded-xl bg-gray-100 p-1 dark:bg-[color:var(--color-surface-sunken)]"><SlidingSelection index={view === 'link' ? 0 : 1} count={2} inset={4} gap={4} className="bg-white shadow-sm dark:bg-[color:var(--color-surface-raised)]" style={{ borderRadius: 8 }}/>
+          {(['link', 'contacts'] as const).map((tab) => <button key={tab} type="button" aria-pressed={view === tab} onClick={() => setView(tab)} className={`ui-press relative inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold transition-colors ${view === tab ? 'text-indigo-700 dark:text-indigo-200' : 'text-gray-500 hover:text-gray-800'}`}>{tab === 'link' ? <Link size={16} /> : <Users size={16} />}{tab === 'link' ? (zh ? '分享連結' : 'Link') : (zh ? '邀請聯絡人' : 'Contacts')}</button>)}
           </div>
         </nav>
       ) : null}
@@ -51,8 +51,8 @@ export default function ShareDialog({ language, title, url, contacts, sharing, o
           <input type="text" readOnly value={url} onFocus={(event) => event.currentTarget.select()} className="mt-2 h-12 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-base font-normal text-gray-800 outline-none focus:border-indigo-500" />
         </label>
         <div className="mt-4 flex flex-wrap gap-3">
-          <button type="button" onClick={() => void copy()} className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-500">{copied ? <Check size={17} /> : <Copy size={17} />}{copied ? (zh ? '已複製' : 'Copied') : (zh ? '複製連結' : 'Copy link')}</button>
-          {onSystemShare ? <button type="button" onClick={() => void onSystemShare().catch(() => setError(zh ? '無法開啟系統分享。' : 'Unable to open sharing.'))} className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50"><Share2 size={17} />{zh ? '系統分享' : 'Share'}</button> : null}
+          <button type="button" onClick={() => void copy()} className="ui-press inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-indigo-500">{copied ? <Check size={17} /> : <Copy size={17} />}{copied ? (zh ? '已複製' : 'Copied') : (zh ? '複製連結' : 'Copy link')}</button>
+          {onSystemShare ? <button type="button" onClick={() => void onSystemShare().catch(() => setError(zh ? '無法開啟系統分享。' : 'Unable to open sharing.'))} className="ui-press inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"><Share2 size={17} />{zh ? '系統分享' : 'Share'}</button> : null}
         </div>
         {copied ? <p role="status" className="mt-3 text-sm text-indigo-700">{zh ? '連結已複製，可以貼到訊息中傳送。' : 'Link copied. Paste it into a message to share.'}</p> : null}
         {error ? <p role="alert" className="mt-3 text-sm leading-6 text-rose-700">{error}</p> : null}

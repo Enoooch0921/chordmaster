@@ -23,6 +23,8 @@ interface TempoPickerProps {
 /** Keep in-progress number entry local until the user applies it. */
 export default function TempoPicker({ value, onChange, language, disabled = false, scopeText, triggerLabel, buttonClassName = '', align = 'right', showOriginalTempo = false, originalTempo, onAdoptOriginalTempo }: TempoPickerProps) {
   const [open, setOpen] = React.useState(false);
+  const [hasOpened, setHasOpened] = React.useState(false);
+  if (open && !hasOpened) setHasOpened(true);
   const [draft, setDraft] = React.useState('');
   const [adopting, setAdopting] = React.useState(false);
   const [error, setError] = React.useState('');
@@ -93,13 +95,13 @@ export default function TempoPicker({ value, onChange, language, disabled = fals
   React.useEffect(() => { if (disabled) close(); }, [disabled, close]);
 
   return <div ref={rootRef} className="tempo-picker">
-    <button ref={triggerRef} type="button" className={`tempo-trigger ${buttonClassName}`} disabled={disabled || adopting} onClick={toggle}
+    <button ref={triggerRef} type="button" className={`tempo-trigger ui-press ${buttonClassName}`} disabled={disabled || adopting} onClick={toggle}
       aria-label={`${zh ? '速度' : 'Tempo'} ${formatTempoBpm(value) || (zh ? '未設定' : 'not set')} BPM`} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}>
       {triggerLabel ?? <span className="tempo-trigger-value">{formatTempoBpm(value) || '—'} <span className="tempo-trigger-unit">BPM</span></span>}
-      <ChevronDown size={12} aria-hidden="true" />
+      <ChevronDown size={12} aria-hidden="true" className={`ui-motion-chevron ${open ? 'rotate-180' : ''}`} />
     </button>
-    {typeof document !== 'undefined' && createPortal(
-      <AnimatedPopover open={open} ready={isPositioned} panelRef={panelRef} origin={transformOrigin} style={panelStyle} className="tempo-panel ui-anchored-panel" role="dialog" aria-label={zh ? '調整速度' : 'Adjust tempo'} id={id}>
+    {hasOpened && typeof document !== 'undefined' && createPortal(
+      <AnimatedPopover animateOnMount open={open} ready={isPositioned} panelRef={panelRef} origin={transformOrigin} style={panelStyle} className="tempo-panel ui-anchored-panel" role="dialog" aria-label={zh ? '調整速度' : 'Adjust tempo'} id={id}>
         <form onSubmit={event => { event.preventDefault(); apply(); }}>
           <div className="tempo-panel-heading"><label htmlFor={`${id}-input`}>{zh ? '速度' : 'Tempo'}</label><span>BPM</span></div>
           {scopeText && !showOriginalTempo && <p className="tempo-scope" id={`${id}-scope`}>{scopeText}</p>}
