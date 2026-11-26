@@ -30,7 +30,7 @@ export interface PreviewChordCursor {
   orderedIndex?: number;
   auditionOffset?: number;
   /** Explicit beat-strip selection edits a single chord, independent of a typed run. */
-  editOffset?: 0 | 0.5;
+  editOffset?: 0 | 0.25 | 0.5 | 0.75;
   slotIndex: number;
   rawChordIndex: number | null;
 }

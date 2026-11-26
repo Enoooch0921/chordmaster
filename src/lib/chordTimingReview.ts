@@ -1,8 +1,8 @@
-import type { Bar, Song } from '../types';
-import { getChordBeatOffset } from '../utils/chordBeatOffsets';
+import type { Bar, ChordMark, Song } from '../types';
+import { canOffsetChord, getChordBeatOffset, normalizeChordBeatOffset } from '../utils/chordBeatOffsets';
 import { getChordDisplaySlotEntries, getChordDisplaySlotOwnership } from '../utils/chordSlots';
 import { hasUnmeteredChords } from '../utils/unmeteredChords';
-import { getSongKeyStates, getSongTimeSignatureStates, type SongBarIdentity } from './songEditing';
+import { findSongBar, getBeatCount, updateBarById, getSongKeyStates, getSongTimeSignatureStates, type SongBarIdentity } from './songEditing';
 
 export interface TimingReview {
   signature: string;
@@ -72,9 +72,25 @@ export function barWithReviewedTiming(bar: Bar, review: TimingReview, positions 
   return { ...bar, chords, chordTimingUnspecified: undefined, chordMarks: Object.keys(marks).length ? marks : undefined };
 }
 
+export type ChordBeatOffsetValue = 0 | 0.25 | 0.5 | 0.75;
+
 export type ChartTimingEdit =
   | { kind: 'review'; review: TimingReview; positions: number[] }
-  | { kind: 'move'; source: BeatMove; to: number; beats: number };
+  | { kind: 'move'; source: BeatMove; to: number; toOffset?: ChordBeatOffsetValue; beats: number }
+  | { kind: 'transfer'; source: BeatMove; beats: number; destination: ChartBeatTarget | null };
+
+export interface ChartBeatTarget extends SongBarIdentity {
+  beat: number;
+  beats: number;
+  offset?: ChordBeatOffsetValue;
+}
+
+export interface MoveChordOptions {
+  targetOffset?: ChordBeatOffsetValue;
+  swap?: boolean;
+}
+
+export type ChordDropOutcome = 'same' | 'allow' | 'swap' | 'blocked';
 
 export interface ChartTimingControls {
   reviews: Map<string, TimingReview>;
@@ -108,32 +124,239 @@ export interface BeatMove {
   chord: string;
 }
 
-export function moveChordToBeat(bar: Bar, beats: number, source: BeatMove, to: number): Bar {
-  if (bar.closed || hasUnmeteredChords(bar) || bar.chordTimingUnspecified || !movableHarmony(source.chord)
-      || !Number.isInteger(to) || to < 0 || to >= beats || to === source.beat || bar.chords.slice(beats).some(chord => chord.trim())) return bar;
-  const ownership = getChordDisplaySlotOwnership(bar.chords, beats);
-  const destination = ownership[to];
-  const subdivisions = bar.chordSubdivisions ?? [];
-  if (destination?.covered || subdivisions.some(entry => entry.beat === to && entry.offset === source.offset)) return bar;
+const isValidOffset = (value: number): value is ChordBeatOffsetValue =>
+  value === 0 || value === 0.25 || value === 0.5 || value === 0.75;
 
-  const extra = subdivisions.find(entry => entry.beat === source.beat && entry.offset === source.offset && entry.chord === source.chord);
-  if (extra) {
-    if (destination && (getChordBeatOffset(bar, destination.rawIndex) === source.offset || /^(?:0|%|\|)/.test(destination.chord))) return bar;
-    return { ...bar, chordSubdivisions: subdivisions.map(entry => entry === extra ? { ...entry, beat: to } : entry)
-      .sort((a, b) => a.beat - b.beat || a.offset - b.offset) };
-  }
-  const start = ownership[source.beat];
-  if (!start || start.covered || start.chord !== source.chord || (getChordBeatOffset(bar, start.rawIndex) ?? 0) !== source.offset
-      || (destination && destination.chord !== '/')) return bar;
-  if (destination && bar.chordMarks?.[destination.rawIndex]) return bar;
+const canHoldOffset = (chord: string, offset: ChordBeatOffsetValue) =>
+  offset === 0 || (canOffsetChord(chord) && !/[<>]/.test(chord));
+
+const hasVisualMark = (mark?: ChordMark) => Boolean(mark?.color || mark?.special);
+
+function markWithOffset(mark: ChordMark | undefined, offset: ChordBeatOffsetValue): ChordMark | undefined {
+  const next: ChordMark = { ...mark };
+  const beatOffset = normalizeChordBeatOffset(offset);
+  if (beatOffset) next.beatOffset = beatOffset;
+  else delete next.beatOffset;
+  return Object.values(next).some(value => value !== undefined && value !== false) ? next : undefined;
+}
+
+// Expand legacy compact measures before changing one slot so the other chords keep their beats.
+function writePrimary(bar: Bar, beats: number, beat: number, chord: string, mark?: ChordMark): Bar {
   const entries = getChordDisplaySlotEntries(bar.chords, beats);
   const chords = entries.map(entry => entry?.chord ?? '');
-  chords[source.beat] = destination?.chord ?? '';
-  chords[to] = source.chord;
   const marks: NonNullable<Bar['chordMarks']> = {};
-  entries.forEach((entry, beat) => {
-    const mark = entry && bar.chordMarks?.[entry.rawIndex];
-    if (mark) marks[beat === source.beat ? to : beat] = mark;
+  entries.forEach((entry, index) => {
+    const existing = entry && bar.chordMarks?.[entry.rawIndex];
+    if (index !== beat && existing) marks[index] = existing;
   });
+  chords[beat] = chord;
+  if (mark) marks[beat] = mark;
   return { ...bar, chords, chordMarks: Object.keys(marks).length ? marks : undefined };
+}
+
+interface LocatedBarEvent {
+  kind: 'primary' | 'subdivision';
+  chord: string;
+  beat: number;
+  offset: ChordBeatOffsetValue;
+  mark?: ChordMark;
+}
+
+function locateBarEvent(bar: Bar, beats: number, beat: number, offset: ChordBeatOffsetValue, expectedChord?: string): LocatedBarEvent | null {
+  const ownership = getChordDisplaySlotOwnership(bar.chords, beats);
+  const owner = ownership[beat];
+  if (owner?.covered) return null;
+  const extras = bar.chordSubdivisions ?? [];
+  const additional = extras.find(e => e.beat === beat && e.offset === offset && (expectedChord === undefined || e.chord === expectedChord));
+  const primaryOffset = owner ? (getChordBeatOffset(bar, owner.rawIndex) ?? 0) : 0;
+  const primaryMatches = Boolean(owner && primaryOffset === offset && (expectedChord === undefined || owner.chord === expectedChord));
+  if (primaryMatches && additional) return null;
+  if (primaryMatches && owner) {
+    return { kind: 'primary', chord: owner.chord, beat, offset, mark: bar.chordMarks?.[owner.rawIndex] };
+  }
+  if (additional) {
+    return { kind: 'subdivision', chord: additional.chord, beat, offset };
+  }
+  return null;
+}
+
+function removeBarEvent(bar: Bar, beats: number, event: LocatedBarEvent, replacement = ''): Bar {
+  if (event.kind === 'subdivision') {
+    const remaining = (bar.chordSubdivisions ?? []).filter(
+      e => !(e.beat === event.beat && e.offset === event.offset && e.chord === event.chord)
+    );
+    return { ...bar, chordSubdivisions: remaining.length ? remaining : undefined };
+  }
+  return writePrimary(bar, beats, event.beat, replacement);
+}
+
+function placeBarEvent(
+  bar: Bar,
+  beats: number,
+  beat: number,
+  offset: ChordBeatOffsetValue,
+  chord: string,
+  mark: ChordMark | undefined,
+  preferPrimary: boolean
+): Bar | null {
+  if (!canHoldOffset(chord, offset)) return null;
+  const ownership = getChordDisplaySlotOwnership(bar.chords, beats);
+  const owner = ownership[beat];
+  const extras = bar.chordSubdivisions ?? [];
+  if (owner?.covered || (owner && /^(?:0|%|\|)/.test(owner.chord))) return null;
+  if (extras.some(e => e.beat === beat && e.offset === offset)) return null;
+  const ownerOffset = owner ? (getChordBeatOffset(bar, owner.rawIndex) ?? 0) : 0;
+  const ownerIsPlainSlash = Boolean(owner && owner.chord === '/' && !bar.chordMarks?.[owner.rawIndex]);
+
+  if (offset === 0) {
+    if (owner && !ownerIsPlainSlash) {
+      if (ownerOffset === 0) return null;
+      if (hasVisualMark(bar.chordMarks?.[owner.rawIndex])) return null;
+      const subdivisions = [...extras, { beat, offset: ownerOffset as 0.25 | 0.5 | 0.75, chord: owner.chord }]
+        .sort((a, b) => a.beat - b.beat || a.offset - b.offset);
+      return { ...writePrimary(bar, beats, beat, chord, markWithOffset(mark, 0)), chordSubdivisions: subdivisions };
+    }
+    return writePrimary(bar, beats, beat, chord, markWithOffset(mark, 0));
+  }
+
+  if (preferPrimary || hasVisualMark(mark)) {
+    if (!owner || ownerIsPlainSlash) {
+      return writePrimary(bar, beats, beat, chord, markWithOffset(mark, offset));
+    }
+    if (hasVisualMark(mark) || ownerOffset === offset) return null;
+    const subdivisions = [...extras, { beat, offset, chord }]
+      .sort((a, b) => a.beat - b.beat || a.offset - b.offset);
+    return { ...bar, chordSubdivisions: subdivisions };
+  }
+
+  if (owner && ownerOffset === offset) return null;
+  const subdivisions = [...extras, { beat, offset, chord }]
+    .sort((a, b) => a.beat - b.beat || a.offset - b.offset);
+  return { ...bar, chordSubdivisions: subdivisions };
+}
+
+export function moveChordToBeat(bar: Bar, beats: number, source: BeatMove, to: number, options: MoveChordOptions = {}): Bar {
+  const targetOffset = (options.targetOffset ?? source.offset) as ChordBeatOffsetValue;
+  if (bar.closed || hasUnmeteredChords(bar) || bar.chordTimingUnspecified || !movableHarmony(source.chord)
+      || !Number.isInteger(to) || to < 0 || to >= beats || !isValidOffset(source.offset) || !isValidOffset(targetOffset)
+      || (to === source.beat && targetOffset === source.offset)
+      || bar.chords.slice(beats).some(chord => chord.trim())) return bar;
+
+  const sourceEvent = locateBarEvent(bar, beats, source.beat, source.offset, source.chord);
+  if (!sourceEvent) return bar;
+
+  const existingDest = locateBarEvent(bar, beats, to, targetOffset);
+  const destIsPlainSlash = Boolean(existingDest && existingDest.kind === 'primary' && existingDest.chord === '/' && !existingDest.mark);
+
+  if (existingDest && !destIsPlainSlash) {
+    if (!options.swap || !movableHarmony(existingDest.chord)) return bar;
+    const cleared = removeBarEvent(removeBarEvent(bar, beats, sourceEvent), beats, existingDest);
+    const withSource = placeBarEvent(
+      cleared, beats, to, targetOffset, sourceEvent.chord, sourceEvent.mark,
+      targetOffset === 0 || sourceEvent.kind === 'primary'
+    );
+    if (!withSource) return bar;
+    const withBoth = placeBarEvent(
+      withSource, beats, source.beat, source.offset, existingDest.chord, existingDest.mark,
+      source.offset === 0 || existingDest.kind === 'primary'
+    );
+    return withBoth ?? bar;
+  }
+
+  const slashToSource = destIsPlainSlash && sourceEvent.kind === 'primary' && source.offset === 0 && to !== source.beat ? '/' : '';
+  const withoutSource = removeBarEvent(bar, beats, sourceEvent, slashToSource);
+  const placed = placeBarEvent(
+    withoutSource, beats, to, targetOffset, sourceEvent.chord, sourceEvent.mark,
+    targetOffset === 0 || sourceEvent.kind === 'primary'
+  );
+  return placed ?? bar;
+}
+
+function editableBeat(song: Song, target: ChartBeatTarget) {
+  const bar = findSongBar(song, target)?.bar;
+  if (!bar || bar.closed || bar.chordTimingUnspecified || hasUnmeteredChords(bar)
+      || getBeatCount(song, bar) !== target.beats || !Number.isInteger(target.beat)
+      || target.beat < 0 || target.beat >= target.beats || bar.chords.slice(target.beats).some(c => c.trim())) return null;
+  return bar;
+}
+
+/** Move within or between two measures, optionally swapping, or remove a single event as one history entry. */
+export function transferChartChord(
+  song: Song,
+  origin: ChartBeatTarget,
+  source: BeatMove,
+  destination: ChartBeatTarget | null,
+  options: { swap?: boolean } = {}
+): Song {
+  const bar = editableBeat(song, origin);
+  if (!bar || source.beat !== origin.beat || !movableHarmony(source.chord) || !isValidOffset(source.offset)) return song;
+  const sourceEvent = locateBarEvent(bar, origin.beats, source.beat, source.offset, source.chord);
+  if (!sourceEvent) return song;
+
+  if (!destination) {
+    return updateBarById(song, origin, () => removeBarEvent(bar, origin.beats, sourceEvent));
+  }
+
+  const targetOffset = (destination.offset ?? source.offset) as ChordBeatOffsetValue;
+  if (!isValidOffset(targetOffset)) return song;
+
+  if (destination.barId === origin.barId && destination.sectionId === origin.sectionId) {
+    const moved = moveChordToBeat(bar, origin.beats, source, destination.beat, { targetOffset, swap: options.swap });
+    return moved === bar ? song : updateBarById(song, origin, () => moved);
+  }
+
+  const dest = editableBeat(song, destination);
+  if (!dest) return song;
+
+  const existingDest = locateBarEvent(dest, destination.beats, destination.beat, targetOffset);
+  const destIsPlainSlash = Boolean(existingDest && existingDest.kind === 'primary' && existingDest.chord === '/' && !existingDest.mark);
+
+  if (existingDest && !destIsPlainSlash) {
+    if (!options.swap || !movableHarmony(existingDest.chord)) return song;
+    const nextDest = placeBarEvent(
+      removeBarEvent(dest, destination.beats, existingDest),
+      destination.beats, destination.beat, targetOffset,
+      sourceEvent.chord, sourceEvent.mark,
+      targetOffset === 0 || sourceEvent.kind === 'primary'
+    );
+    const nextOrigin = placeBarEvent(
+      removeBarEvent(bar, origin.beats, sourceEvent),
+      origin.beats, source.beat, source.offset,
+      existingDest.chord, existingDest.mark,
+      source.offset === 0 || existingDest.kind === 'primary'
+    );
+    if (!nextDest || !nextOrigin) return song;
+    return updateBarById(updateBarById(song, destination, () => nextDest), origin, () => nextOrigin);
+  }
+
+  const nextDest = placeBarEvent(
+    dest, destination.beats, destination.beat, targetOffset,
+    sourceEvent.chord, sourceEvent.mark,
+    targetOffset === 0 || sourceEvent.kind === 'primary'
+  );
+  if (!nextDest) return song;
+  const nextOrigin = removeBarEvent(bar, origin.beats, sourceEvent);
+  return updateBarById(updateBarById(song, destination, () => nextDest), origin, () => nextOrigin);
+}
+
+/** Classify a candidate drop target without mutating the score. */
+export function inspectChartChordDrop(
+  song: Song,
+  origin: ChartBeatTarget,
+  source: BeatMove,
+  destination: ChartBeatTarget,
+  options: { swap?: boolean } = {}
+): ChordDropOutcome {
+  const targetOffset = (destination.offset ?? source.offset) as ChordBeatOffsetValue;
+  if (destination.barId === origin.barId && destination.sectionId === origin.sectionId
+      && destination.beat === source.beat && targetOffset === source.offset) {
+    return 'same';
+  }
+  const next = transferChartChord(song, origin, source, destination, options);
+  if (next === song) return 'blocked';
+  const destBar = findSongBar(song, destination)?.bar;
+  if (!destBar) return 'allow';
+  const existing = locateBarEvent(destBar, destination.beats, destination.beat, targetOffset);
+  const plainSlash = Boolean(existing && existing.kind === 'primary' && existing.chord === '/' && !existing.mark);
+  return existing && !plainSlash ? 'swap' : 'allow';
 }

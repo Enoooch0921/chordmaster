@@ -1,16 +1,221 @@
 .chord-move-lane { position: relative; width: 100%; min-width: 0; }
-[data-move-chord] { cursor: grab; touch-action: pan-y pinch-zoom; user-select: none; }
+[data-move-chord] { cursor: grab; touch-action: pan-y pinch-zoom; user-select: none; -webkit-touch-callout: none; }
 [data-move-chord]:active { cursor: grabbing; }
-[data-move-chord]:focus-visible, .timing-review-action:focus-visible { outline: 2px solid #4338ca; outline-offset: 2px; border-radius: 3px; }
-.chord-drop-grid { display: grid; position: absolute; inset: 0; z-index: 35; pointer-events: none; }
-.chord-drop-grid > span { border-inline-start: 1px dashed #64748b; padding-inline-start: 2px; color: #334155; font: 700 10px/1.3 system-ui; background: #f8fafacc; }
-.chord-drop-grid > [data-target="allowed"] { background: #e0e7ffdd; color: #312e81; box-shadow: inset 0 0 0 2px #4f46e5; }
-.chord-drop-grid > [data-target="blocked"] { box-shadow: inset 0 0 0 1px #b45309; color: #92400e; }
-.timing-review-action { display: inline-flex; align-items: center; align-self: flex-start; min-height: 24px; padding-inline: 4px; border-radius: 4px; color: #92400e; background: #fffbeb; font-size: 10px; font-weight: 650; cursor: pointer; }
-@media print { .chord-drop-grid, .timing-review-action { display: none; } }
+[data-move-chord]:focus-visible, .timing-review-action:focus-visible { outline: 2px solid #285e41; outline-offset: 2px; border-radius: 3px; }
 
-.chord-drop-grid b { display: block; overflow: hidden; padding-inline: 1px; font-size: 13px; line-height: 1; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+/* Lightweight bottom beat drop rail — never obscures existing chords inside the bar */
+.chord-drop-rail {
+  display: grid;
+  position: absolute;
+  inset: auto 2px 2px;
+  height: 7px;
+  gap: 2px;
+  z-index: 44;
+  pointer-events: none;
+}
+.chord-drop-rail-beat {
+  display: grid;
+  height: 100%;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgb(148 163 184 / .24);
+}
+.chord-drop-rail-cell {
+  display: block;
+  height: 100%;
+  font-style: normal;
+  transition: background-color 90ms var(--ease-ui-out, cubic-bezier(0.23, 1, 0.32, 1));
+}
+.chord-drop-rail-cell:first-child:not(:last-child) {
+  border-inline-end: 1px dotted rgb(100 116 139 / .45);
+}
+.chord-drop-rail-cell[data-target="allow"] { background: #285e41; }
+.chord-drop-rail-cell[data-target="blocked"] { background: #94a3b8; }
+
+.chord-snap-beacon {
+  position: absolute;
+  bottom: 10px;
+  transform: translateX(-50%);
+  z-index: 46;
+  pointer-events: none;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+.chord-snap-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font: 700 10px/1.25 system-ui;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: #fff;
+  background: #285e41;
+  box-shadow: 0 2px 6px rgb(15 23 42 / .2);
+}
+.chord-snap-line {
+  width: 2px;
+  height: 22px;
+  border-radius: 2px;
+  background: #285e41;
+}
+.chord-snap-beacon[data-outcome="blocked"] .chord-snap-badge { background: #64748b; }
+.chord-snap-beacon[data-outcome="blocked"] .chord-snap-line { background: #94a3b8; }
+
+/* Mark the source chord while it is being dragged. */
+[data-move-chord][data-chord-lifted] {
+  opacity: .24;
+  outline: 1.5px dashed #285e41;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Floating drag pill (never transition left/top so pointer tracking stays 1:1) */
+.chord-drag-ghost, .chord-trash-dock {
+  position: fixed;
+  z-index: 6500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+.chord-drag-ghost {
+  pointer-events: none;
+  gap: 5px;
+  padding: 5px 10px 5px 7px;
+  max-width: 13rem;
+  border-radius: 10px;
+  border: 1.5px solid #285e41;
+  color: #173c2b;
+  background: #fff;
+  box-shadow: 0 12px 28px rgb(15 23 42 / .22);
+  font: 750 17px/1.1 system-ui;
+  transform: translate(-50%, calc(-100% - 15px)) scale(1.05);
+}
+.chord-ghost-label {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chord-drag-ghost > svg { flex: none; }
+.chord-ghost-beat {
+  border-radius: 999px;
+  padding: 2px 6px;
+  margin-inline-start: 2px;
+  color: #fff;
+  background: #285e41;
+  font: 700 10px/1.2 system-ui;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+
+.chord-drag-ghost[data-state="blocked"] {
+  color: #64748b;
+  background: #f8fafc;
+  border-color: #94a3b8;
+  opacity: .88;
+}
+
+.chord-drag-ghost[data-state="idle"] {
+  color: #475569;
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  opacity: .86;
+  transform: translate(-50%, calc(-100% - 15px)) scale(0.98);
+}
+
+.chord-drag-ghost[data-state="trash"] {
+  color: #be123c;
+  background: #fff1f2;
+  border-color: #be123c;
+  box-shadow: 0 10px 24px rgb(190 18 60 / .24);
+  transform: translate(-50%, calc(-100% - 15px)) scale(0.92) rotate(-4deg);
+}
+
+/* Floating Trash Dock (glides in via floatingActionVariants) */
+.chord-trash-dock {
+  left: 50%;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  margin-inline-start: -31px;
+  width: 62px;
+  height: 48px;
+  border: 1.5px dashed #b97582;
+  border-radius: 999px;
+  color: #9f1239;
+  background: rgb(255 245 246 / .96);
+  box-shadow: 0 6px 20px rgb(15 23 42 / .16);
+}
+.chord-trash-dock[data-active="true"] {
+  background: #be123c;
+  border: 2px solid #fff;
+  color: #fff;
+  box-shadow: 0 0 0 2px #be123c, 0 8px 22px rgb(190 18 60 / .32);
+}
+
+.dark .chord-trash-dock {
+  background: rgb(42 20 26 / .96);
+  border-color: #9f4355;
+  color: #fecdd3;
+}
+.dark .chord-trash-dock[data-active="true"] {
+  background: #be123c;
+  border-color: #fff1f2;
+  color: #fff;
+}
+
+@media (pointer: coarse) {
+  .chord-drag-ghost { transform: translate(-50%, calc(-100% - 36px)) scale(1.05); }
+  .chord-drag-ghost[data-state="idle"] { transform: translate(-50%, calc(-100% - 36px)) scale(0.98); }
+  .chord-drag-ghost[data-state="trash"] { transform: translate(-50%, calc(-100% - 36px)) scale(0.92) rotate(-4deg); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .chord-drag-ghost {
+    transition: background-color 150ms var(--ease-ui-out, cubic-bezier(0.23, 1, 0.32, 1)),
+                border-color 150ms var(--ease-ui-out, cubic-bezier(0.23, 1, 0.32, 1)),
+                color 150ms var(--ease-ui-out, cubic-bezier(0.23, 1, 0.32, 1)),
+                transform 150ms var(--ease-ui-out, cubic-bezier(0.23, 1, 0.32, 1)),
+                opacity 140ms ease;
+  }
+  .chord-trash-dock {
+    transition: background-color 140ms var(--ease-ui-out, cubic-bezier(0.23, 1, 0.32, 1)),
+                border-color 140ms var(--ease-ui-out, cubic-bezier(0.23, 1, 0.32, 1)),
+                color 140ms var(--ease-ui-out, cubic-bezier(0.23, 1, 0.32, 1)),
+                box-shadow 140ms var(--ease-ui-out, cubic-bezier(0.23, 1, 0.32, 1));
+  }
+  .chord-trash-dock svg {
+    transition: transform 150ms var(--ease-ui-out, cubic-bezier(0.23, 1, 0.32, 1));
+  }
+  .chord-trash-dock[data-active="true"] svg {
+    transform: scale(1.14);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chord-drag-ghost,
+  .chord-drag-ghost[data-state="idle"],
+  .chord-drag-ghost[data-state="trash"] {
+    transform: translate(-50%, calc(-100% - 15px));
+  }
+  @media (pointer: coarse) {
+    .chord-drag-ghost,
+    .chord-drag-ghost[data-state="idle"],
+    .chord-drag-ghost[data-state="trash"] {
+      transform: translate(-50%, calc(-100% - 36px));
+    }
+  }
+  .chord-drop-rail-cell { transition: none; }
+}
+
+.timing-review-action { display: inline-flex; align-items: center; align-self: flex-start; min-height: 24px; padding-inline: 4px; border-radius: 4px; color: #92400e; background: #fffbeb; font-size: 10px; font-weight: 650; cursor: pointer; }
+@media print { .chord-drop-rail, .chord-snap-beacon, .chord-drag-ghost, .chord-trash-dock, .timing-review-action { display: none; } }
 @media (hover: hover) and (pointer: fine) {
-  [data-move-chord]:hover { outline: 1px dashed var(--section-selection-stroke, #4338ca); outline-offset: 1px; }
+  [data-move-chord]:hover { outline: 1px dashed var(--section-selection-stroke, #285e41); outline-offset: 1px; }
   .timing-review-action:hover { background: #fef3c7; }
 }

@@ -17,8 +17,16 @@ import { canCloseBar, isClosedBar } from '../../utils/closedBar';
 import ChordSubdivisionsEditor from '../ChordSubdivisionsEditor';
 import ChordBeatOffsetPicker from '../ChordBeatOffsetPicker';
 import ChordTimingReviewEditor from './ChordTimingReviewEditor';
-import { indexTimingReviews, timingBarKey, confirmChordTiming, moveChordToBeat, movableHarmony } from '../../lib/chordTimingReview';
-import ChordBeatStrip, { canSelectOffbeat } from './ChordBeatStrip';
+import {
+  indexTimingReviews,
+  inspectChartChordDrop,
+  timingBarKey,
+  confirmChordTiming,
+  moveChordToBeat,
+  movableHarmony,
+  type ChordBeatOffsetValue
+} from '../../lib/chordTimingReview';
+import ChordBeatStrip, { canSelectOffbeat, type OffbeatMoveControls } from './ChordBeatStrip';
 import { getChordDisplaySlotOwnership } from '../../utils/chordSlots';
 import { splitDirectChordRun } from '../../utils/chordSubdivisions';
 import { canOffsetChord, getChordBeatOffset } from '../../utils/chordBeatOffsets';
@@ -394,10 +402,11 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const editOffset = chordCursor?.editOffset;
   const beatSlots = bar ? getChordBeatSlots(bar, beatCount) : [];
   const slot = beatSlots[session.target.slotIndex];
-  const primaryOffset = bar && slot?.rawChordIndex != null ? getChordBeatOffset(bar, slot.rawChordIndex) ?? 0 : 0;
-  const editingAdditional = editOffset === 0.5 && primaryOffset !== 0.5;
+  const primaryOffset = (bar && slot?.rawChordIndex != null ? getChordBeatOffset(bar, slot.rawChordIndex) ?? 0 : 0) as ChordBeatOffsetValue;
+  const activeChordOffset = (editOffset ?? chordCursor?.auditionOffset ?? primaryOffset) as ChordBeatOffsetValue;
+  const editingAdditional = editOffset !== undefined && editOffset !== 0 && primaryOffset !== editOffset;
   const storedChord = editingAdditional
-    ? bar?.chordSubdivisions?.find(entry => entry.beat === session.target.slotIndex && entry.offset === 0.5)?.chord ?? ''
+    ? bar?.chordSubdivisions?.find(entry => entry.beat === session.target.slotIndex && entry.offset === editOffset)?.chord ?? ''
     : slot?.chord ?? '';
   const displayedChord = bar?.chordKeyUnspecified ? storedChord : convertStoredChordToDisplayedChord({
     chord: storedChord,
@@ -530,16 +539,16 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       displayedKey,
       storedKey
     });
-    if (editOffset === 0.5 && stored && !(editingAdditional && stored === '0_') && (!canOffsetChord(stored) || /[<>\s]/.test(stored))) {
+    if (editOffset !== undefined && editOffset !== 0 && stored && !(editingAdditional && editOffset === 0.5 && stored === '0_') && (!canOffsetChord(stored) || /[<>\s]/.test(stored))) {
       setMultiRestActionError(language === 'zh' ? '請在反拍輸入和弦。' : 'Enter a chord at the offbeat.');
       return false;
     }
-    if (editingAdditional && bar) {
+    if (editingAdditional && bar && editOffset) {
       const beat = session.target.slotIndex;
-      const entries = (bar.chordSubdivisions ?? []).filter(entry => entry.beat !== beat || entry.offset !== 0.5);
-      if (stored) entries.push({beat, offset: 0.5, chord: stored});
+      const entries = (bar.chordSubdivisions ?? []).filter(entry => entry.beat !== beat || entry.offset !== editOffset);
+      if (stored) entries.push({ beat, offset: editOffset, chord: stored });
       entries.sort((a, b) => (a.beat + a.offset) - (b.beat + b.offset));
-      updateFields({chordSubdivisions: entries.length ? entries : undefined}, mergeKey);
+      updateFields({ chordSubdivisions: entries.length ? entries : undefined }, mergeKey);
       setMultiRestActionError(null);
       return true;
     }
@@ -743,6 +752,19 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       }
       if (meta && event.key === 'Enter') {
         event.preventDefault();
+        return;
+      }
+      if (
+        !isTyping
+        && !isButtonActivation
+        && isChordEditing
+        && event.altKey
+        && !meta
+        && !event.isComposing
+        && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')
+      ) {
+        event.preventDefault();
+        nudgeSelectedChord(event.key === 'ArrowLeft' ? -1 : 1, event.shiftKey ? 0.25 : 0.5);
         return;
       }
       if (
@@ -1161,30 +1183,62 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   };
 
   const renderChordBeatOffsetPicker = () => {
-    const source = { chord: storedChord, beat: session.target.slotIndex, offset: editOffset ?? primaryOffset };
+    const source = { chord: storedChord, beat: session.target.slotIndex, offset: activeChordOffset };
+    const occupiedOffsets = bar && movableHarmony(storedChord)
+      ? ([0, 0.25, 0.5, 0.75] as const).filter(
+          candidate => candidate !== activeChordOffset
+            && moveChordToBeat(bar, beatCount, source, session.target.slotIndex, { targetOffset: candidate }) === bar
+        )
+      : bar?.chordSubdivisions?.filter(e => e.beat === session.target.slotIndex).map(e => e.offset);
     return <div className="flex flex-wrap items-center gap-2">
       {bar && movableHarmony(storedChord) && <label className="flex items-center gap-1 text-xs font-semibold">
         {language === 'zh' ? '移動和弦' : 'Move chord'}
         <select name="move-chord-to-beat" className="min-h-8 rounded border border-slate-300 bg-white px-1 text-slate-900" value={source.beat}
           onChange={event => {
             const to = Number(event.target.value);
-            const next = moveChordToBeat(bar, beatCount, source, to);
+            const next = moveChordToBeat(bar, beatCount, source, to, { targetOffset: activeChordOffset });
             if (next === bar) return;
             onApplyDraft(updateBarById(session.draftSong, session.target, () => next));
-            onNotationCursorChange({ kind: 'chord', slotIndex: to, rawChordIndex: editingAdditional ? null : to,
-              ...(editOffset !== undefined ? { editOffset } : {}) });
+            const rawChordIndex = getChordBeatSlots(next, beatCount)[to]?.rawChordIndex ?? null;
+            onNotationCursorChange({
+              kind: 'chord',
+              slotIndex: to,
+              rawChordIndex,
+              auditionOffset: activeChordOffset,
+              ...(activeChordOffset !== 0 || editOffset !== undefined ? { editOffset: activeChordOffset } : {})
+            });
           }}>
           {Array.from({ length: beatCount }, (_, beat) => <option key={beat} value={beat}
-            disabled={beat !== source.beat && moveChordToBeat(bar, beatCount, source, beat) === bar}>
+            disabled={beat !== source.beat && moveChordToBeat(bar, beatCount, source, beat, { targetOffset: activeChordOffset }) === bar}>
             {language === 'zh' ? `第 ${beat + 1} 拍` : `Beat ${beat + 1}`}</option>)}
         </select>
       </label>}
       <ChordBeatOffsetPicker
-    occupiedOffsets={bar?.chordSubdivisions?.filter(e=>e.beat===session.target.slotIndex).map(e=>e.offset)}
-    value={bar ? getChordBeatOffset(bar, activeChordMarkIndex) : undefined}
-    disabled={editingAdditional || !canOffsetChord(storedChord)} language={language}
-    onChange={value => onApplyDraft(setChordBeatOffset(session.draftSong, session.target, value), { mergeKey: `chord-position:${bar?.id}:${session.target.slotIndex}` })}
-  /></div>;
+        occupiedOffsets={occupiedOffsets}
+        value={activeChordOffset || undefined}
+        disabled={!canOffsetChord(storedChord)}
+        language={language}
+        onChange={value => {
+          const targetOffset = value as ChordBeatOffsetValue;
+          if (bar && movableHarmony(storedChord)) {
+            const next = moveChordToBeat(bar, beatCount, source, session.target.slotIndex, { targetOffset });
+            if (next !== bar) {
+              onApplyDraft(updateBarById(session.draftSong, session.target, () => next), { mergeKey: `chord-position:${bar.id}:${session.target.slotIndex}` });
+              const rawChordIndex = getChordBeatSlots(next, beatCount)[session.target.slotIndex]?.rawChordIndex ?? null;
+              setAuditionSelection(null);
+              onNotationCursorChange({
+                kind: 'chord',
+                slotIndex: session.target.slotIndex,
+                rawChordIndex,
+                editOffset: targetOffset,
+                auditionOffset: targetOffset
+              });
+            }
+            return;
+          }
+          onApplyDraft(setChordBeatOffset(session.draftSong, session.target, value), { mergeKey: `chord-position:${bar?.id}:${session.target.slotIndex}` });
+        }}
+      /></div>;
   };
 
   const applyPreviewColor = (color: AnnotationColorId) => {
@@ -1404,7 +1458,14 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   </div>;
   const repeatBarTitle = language === 'zh' ? '加入重複前一小節的記號' : 'Insert a previous-bar repeat mark';
   const keyboardContent = notationMode === 'chords' && subdivisionsExpanded ? (
-    <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2"><ChordSubdivisionsEditor selectedBeat={session.target.slotIndex} onSelectChord={entry => setAuditionSelection({ anchorKey: sourceSession.target.anchorKey, cursor: chordCursor, beat: entry.beat, offset: entry.offset })} bar={bar} beats={beatCount} language={language} onChange={chordSubdivisions => updateFields({chordSubdivisions})}/>{tempoControls}</div>
+    <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2"><ChordSubdivisionsEditor selectedBeat={session.target.slotIndex} onSelectChord={entry => setAuditionSelection({ anchorKey: sourceSession.target.anchorKey, cursor: chordCursor, beat: entry.beat, offset: entry.offset })} bar={bar} beats={beatCount} language={language} onChange={chordSubdivisions => updateFields({chordSubdivisions})} onMoveToDownbeat={(entry, targetBeat) => {
+      const next = moveChordToBeat(bar, beatCount, entry, targetBeat, { targetOffset: 0 });
+      if (next === bar) return;
+      onApplyDraft(updateBarById(session.draftSong, session.target, () => next));
+      const rawChordIndex = getChordBeatSlots(next, beatCount)[targetBeat]?.rawChordIndex ?? null;
+      setAuditionSelection(null);
+      onNotationCursorChange({ kind: 'chord', slotIndex: targetBeat, rawChordIndex, editOffset: 0, auditionOffset: 0 });
+    }}/>{tempoControls}</div>
   ) : (
     <div data-keyboard-mode={keyboardSurfaceMode} data-notation-mode={notationMode} data-keyboard-surface="system" className={`relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-hidden bg-[linear-gradient(180deg,rgba(241,245,249,0.92)_0%,rgba(203,213,225,0.82)_100%)] ${mode === 'symbols' ? 'gap-1.5 p-2' : 'gap-2 p-2.5'}`}>
       {!isPickup && sourceBar?.unisonMark?.enabled && <button
@@ -1882,6 +1943,92 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const previousBeatButton = deviceLayout === 'desktop' && <button type="button" className={toolbarButtonClass} onClick={() => navigateNotation('previous')} aria-label="Previous beat"><ChevronLeft size={16} /></button>;
   const selectedModeIndex = mode === 'text' ? visibleNotationModes.length : Math.max(0, visibleNotationModes.indexOf(notationMode));
 
+  const beat = session.target.slotIndex;
+  const selectedOffbeat = notationMode === 'chords' && activeChordOffset !== 0 && movableHarmony(storedChord);
+
+  function relocateSelectedChord(destBeat: number, destOffset: ChordBeatOffsetValue, focusMode: 'strip' | 'capture', swap = false) {
+    if (!bar || !movableHarmony(storedChord)) return false;
+    const source = { chord: storedChord, beat, offset: activeChordOffset };
+    const nextBar = moveChordToBeat(bar, beatCount, source, destBeat, { targetOffset: destOffset, swap });
+    if (nextBar === bar) return false;
+    onApplyDraft(updateBarById(session.draftSong, session.target, () => nextBar));
+    const rawChordIndex = getChordBeatSlots(nextBar, beatCount)[destBeat]?.rawChordIndex ?? null;
+    setAuditionSelection(null);
+    onNotationCursorChange({
+      kind: 'chord',
+      slotIndex: destBeat,
+      rawChordIndex,
+      editOffset: destOffset,
+      auditionOffset: destOffset
+    });
+    if (focusMode === 'capture' && deviceLayout === 'desktop') {
+      requestAnimationFrame(() => {
+        chordCaptureRef.current?.focus({ preventScroll: true });
+        chordCaptureRef.current?.select();
+      });
+    } else {
+      requestAnimationFrame(() => panelRef.current?.querySelector<HTMLButtonElement>(
+        '.chord-beat-strip button[aria-pressed="true"]'
+      )?.focus({ preventScroll: true }));
+    }
+    return true;
+  }
+
+  function nudgeSelectedChord(direction: -1 | 1, step: 0.25 | 0.5) {
+    if (!bar || !movableHarmony(storedChord)) return false;
+    const rawPos = step === 0.5
+      ? beat + (direction < 0
+          ? (activeChordOffset > 0.5 ? 0.5 : activeChordOffset > 0 ? 0 : -0.5)
+          : (activeChordOffset < 0.5 ? 0.5 : 1))
+      : beat + activeChordOffset + direction * 0.25;
+    if (rawPos < 0 || rawPos >= beatCount) return false;
+    const destBeat = Math.floor(rawPos);
+    const destOffset = (Math.round((rawPos - destBeat) * 4) / 4) as ChordBeatOffsetValue;
+    return relocateSelectedChord(destBeat, destOffset, 'capture');
+  }
+
+  const offbeatMoveControls: OffbeatMoveControls | undefined = (() => {
+    if (!selectedOffbeat || !bar) return undefined;
+    const origin = { sectionId: session.target.sectionId, barId: session.target.barId, beat, beats: beatCount };
+    const source = { chord: storedChord, beat, offset: activeChordOffset };
+    const leftOutcome = inspectChartChordDrop(session.draftSong, origin, source, { ...origin, beat, offset: 0 }, { swap: true });
+    const leftAvailable = leftOutcome === 'allow' || leftOutcome === 'swap';
+    const leftSwap = leftOutcome === 'swap';
+    const leftLabel = leftAvailable
+      ? (leftSwap
+          ? (language === 'zh' ? `與第 ${beat + 1} 拍互換` : `Swap with beat ${beat + 1}`)
+          : (language === 'zh' ? `移到第 ${beat + 1} 拍` : `Move to beat ${beat + 1}`))
+      : (language === 'zh' ? `第 ${beat + 1} 拍已有和弦或記號` : `Beat ${beat + 1} already has a chord or mark`);
+
+    let right: OffbeatMoveControls['right'];
+    if (beat + 1 < beatCount) {
+      const nextBeat = beat + 1;
+      const rightOutcome = inspectChartChordDrop(session.draftSong, origin, source, { ...origin, beat: nextBeat, offset: 0 }, { swap: true });
+      const rightAvailable = rightOutcome === 'allow' || rightOutcome === 'swap';
+      const rightSwap = rightOutcome === 'swap';
+      right = {
+        available: rightAvailable,
+        swap: rightSwap,
+        shortTarget: String(nextBeat + 1),
+        label: rightSwap
+          ? (language === 'zh' ? `與第 ${nextBeat + 1} 拍互換` : `Swap with beat ${nextBeat + 1}`)
+          : (language === 'zh' ? `移到第 ${nextBeat + 1} 拍` : `Move to beat ${nextBeat + 1}`),
+        run: () => relocateSelectedChord(nextBeat, 0, 'strip', rightSwap)
+      };
+    }
+
+    return {
+      left: {
+        available: leftAvailable,
+        swap: leftSwap,
+        shortTarget: String(beat + 1),
+        label: leftLabel,
+        run: () => relocateSelectedChord(beat, 0, 'strip', leftSwap)
+      },
+      right
+    };
+  })();
+
   function selectCurrentOffbeat() {
     if (!bar || !beatSlots.length) return;
     const beat = session.target.slotIndex;
@@ -1890,7 +2037,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     }
   }
 
-  function selectChordPosition(beat: number, offset: 0 | 0.5) {
+  function selectChordPosition(beat: number, offset: ChordBeatOffsetValue) {
     setAuditionSelection(null);
     setBassMode(false);
     setMultiRestActionError(null);
@@ -2013,8 +2160,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           : () => applyJianpuAction({ type: 'delete', direction: 'backward' })}
       />}
       {!collapsed && notationMode === 'chords' && mode !== 'text' && !subdivisionsExpanded && beatSlots.length > 0 &&
-        <ChordBeatStrip bar={bar} beats={beatCount} beat={session.target.slotIndex} offset={editOffset ?? primaryOffset}
-          language={language} onSelect={selectChordPosition}/>}
+        <ChordBeatStrip bar={bar} beats={beatCount} beat={session.target.slotIndex} offset={activeChordOffset}
+          language={language} onSelect={selectChordPosition}
+          offbeatMove={offbeatMoveControls}/>}
 
       {phoneAudition && <div className="phone-audition-row">
         <div className="phone-audition-position">
@@ -2066,6 +2214,10 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               event.preventDefault();
               event.stopPropagation();
               selectCurrentOffbeat();
+            } else if (!meta && event.altKey && !event.nativeEvent.isComposing && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+              event.preventDefault();
+              event.stopPropagation();
+              nudgeSelectedChord(event.key === 'ArrowLeft' ? -1 : 1, event.shiftKey ? 0.25 : 0.5);
             } else if (!meta && event.altKey && !event.shiftKey && applyChordEndingShortcut(event.key, event.code)) {
               event.preventDefault();
               event.stopPropagation();
@@ -2112,7 +2264,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           autoComplete="off"
           autoCorrect="off"
           spellCheck={false}
-          aria-keyshortcuts="Tab Shift+Tab Enter &amp;"
+          aria-keyshortcuts="Tab Shift+Tab Enter &amp; Alt+ArrowLeft Alt+ArrowRight"
           tabIndex={-1}
           className="pointer-events-none fixed left-0 top-0 h-px w-px opacity-0"
           aria-label={language === 'zh' ? '和弦直接輸入' : 'Direct chord input'}

@@ -1,5 +1,5 @@
 import ChordBeatDragLane, { beatHandle } from './ChordBeatDragLane';
-import { barWithReviewedTiming, movableHarmony, moveChordToBeat, timingBarKey, type BeatMove, type ChartTimingControls } from '../lib/chordTimingReview';
+import { barWithReviewedTiming, movableHarmony, moveChordToBeat, transferChartChord, timingBarKey, type BeatMove, type ChartTimingControls } from '../lib/chordTimingReview';
 import ChartSongMap, { type SongMapEditorOptions } from './ChartSongMap';
 import { getSongMap, shouldShowSongMap } from '../lib/songMap';
 import NotationSelectionPointer from './NotationSelectionPointer';
@@ -36,6 +36,7 @@ import { Song, Section, Bar, Key, AppLanguage, NavigationMarker, BarLabelLane } 
 import { getTransposeOffset, transposeChordForDisplay, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey, transposeKeyPreferFlats, normalizeKeySpelling, getParenthesizedChordInner } from '../utils/musicUtils';
 import { getChordFontFamily } from '../constants/chordFonts';
 import {
+  findSongBar,
   getEffectiveTimeSignatureForBar,
   getSongKeyStates,
   getSongDisplayKeyStates,
@@ -3268,6 +3269,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                     return (
 	                      <div
 	                        key={bIdx}
+                          data-chord-drop-beats={timingControls && bar && !isClosedCell ? beatsPerBar : undefined}
                           data-audition-chart={onElementClick || readerAudition ? previewIdentity : undefined}
                           data-audition-section={previewBarSectionId}
                           data-audition-bar={previewBarId}
@@ -3822,14 +3824,32 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                                           || !getChordEvents(primaryBar, beatsPerBar).some(entry => movableHarmony(entry.chord))) return content;
                                       const positionsAfterMove = (positions: number[], source: BeatMove, to: number) =>
                                         positions.map(beat => beat === source.beat ? to : beat);
-                                      return <ChordBeatDragLane key={JSON.stringify([previewIdentity, target.sectionId, target.barId])} beats={beatsPerBar}
-                                        canMove={(source, to) => {
-                                          if (moveChordToBeat(primaryBar, beatsPerBar, source, to) === primaryBar) return false;
+                                      return <ChordBeatDragLane key={JSON.stringify([previewIdentity, target.sectionId, target.barId])} beats={beatsPerBar} language={language}
+                                        renderChord={(source, destination) => {
+                                          const located = destination && findSongBar(song, destination);
+                                          let label = displayBarChord(source.chord);
+                                          if (located) {
+                                            const { sectionIndex, barIndex } = located;
+                                            const written = songKeyStates.barActiveKeys[sectionIndex][barIndex];
+                                            const play = getPlayKey(displayKeyStates.barActiveKeys[sectionIndex][barIndex], capo);
+                                            label = located.bar.chordKeyUnspecified ? source.chord : getDisplayedChordString(source.chord,
+                                              getTransposeOffset(written, play), play, song.showNashvilleNumbers, false, written);
+                                          }
+                                          return <FormattedChord chordString={label} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily}/>;
+                                        }}
+                                        transfer={review ? undefined : (source, destination, commit) => {
+                                          const origin = { ...target, beat: source.beat, beats: beatsPerBar };
+                                          if (transferChartChord(song, origin, source, destination) === song) return false;
+                                          if (commit) controls.onEdit(target, { kind: 'transfer', source, beats: beatsPerBar, destination });
+                                          return true;
+                                        }}
+                                        canMove={(source, to, targetOffset) => {
+                                          if (moveChordToBeat(primaryBar, beatsPerBar, source, to, { targetOffset }) === primaryBar) return false;
                                           return !review || positionsAfterMove(review.positions, source, to).every((beat, i, all) => i === 0 || beat > all[i - 1]);
                                         }}
-                                        onMove={(source, to) => controls.onEdit(target, review
+                                        onMove={(source, to, toOffset) => controls.onEdit(target, review
                                           ? { kind: 'review', review, positions: positionsAfterMove(review.positions, source, to) }
-                                          : { kind: 'move', source, to, beats: beatsPerBar })}>{content}</ChordBeatDragLane>;
+                                          : { kind: 'move', source, to, toOffset, beats: beatsPerBar })}>{content}</ChordBeatDragLane>;
                                     };
                                     if (review && controls && target) {
                                       const scope = language === 'zh' ? `確認 ${review.count} 個同型小節` : `Confirm ${review.count} ${review.count === 1 ? 'bar' : 'bars'}`;

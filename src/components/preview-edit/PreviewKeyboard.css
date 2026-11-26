@@ -452,10 +452,43 @@
 .chord-beat-strip { position: relative; display: flex; flex: none; gap: 4px; padding: 3px 8px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; border-bottom: 1px solid var(--keyboard-border); }
 .chord-beat-pair { --beat-key-width: 32px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); flex: 1 0 0; min-width: var(--beat-key-width); }
 .chord-beat-pair[data-split] { min-width: calc(2 * var(--beat-key-width)); }
-.chord-beat-pair button { display: grid; align-content: center; min-width: 0; min-height: 40px; padding: 2px; border-radius: 5px; font-variant-numeric: tabular-nums; line-height: 1.1; font-size: 13px; font-weight: 650; color: var(--keyboard-text); touch-action: manipulation; cursor: pointer; }
-.chord-beat-pair button:nth-child(2) { font-weight: 450; color: var(--keyboard-muted); }
+.chord-beat-pair button { display: grid; align-content: center; min-width: 0; min-height: 44px; padding: 2px; border-radius: 5px; font-variant-numeric: tabular-nums; line-height: 1.1; font-size: 13px; font-weight: 650; color: var(--keyboard-text); touch-action: manipulation; cursor: pointer; }
+.chord-beat-pair[data-split] button:last-child:not([aria-pressed="true"]) { font-weight: 450; color: var(--keyboard-muted); }
 .chord-beat-value { min-height: 1.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .chord-beat-pair button[aria-pressed="true"] { font-weight: 750; color: white; background: var(--keyboard-active); }
 .chord-beat-pair button:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }
 .chord-beat-pair button:disabled { opacity: .4; cursor: default; }
-@media (pointer: coarse) { .chord-beat-pair { --beat-key-width: 40px; } }
+
+.chord-beat-pair[data-move-action] { gap: 2px; min-width: calc(3 * var(--beat-key-width)); }
+.chord-beat-pair .beat-snap-action, .beat-snap-locked { display: flex; align-items: center; justify-content: center; gap: 2px; }
+.chord-beat-pair .beat-snap-action {
+  background: rgb(40 94 65 / .11);
+  color: var(--keyboard-active);
+  border: 1px solid rgb(40 94 65 / .45);
+  font-size: 12px;
+  font-weight: 700;
+}
+.chord-beat-pair .beat-snap-action[data-swap="true"] {
+  background: rgb(217 119 6 / .12);
+  color: #b45309;
+  border-color: rgb(217 119 6 / .52);
+}
+.dark .chord-beat-pair .beat-snap-action {
+  background: rgb(47 121 81 / .22);
+  border-color: rgb(110 198 148 / .48);
+  color: #b5e7c9;
+}
+.dark .chord-beat-pair .beat-snap-action[data-swap="true"] {
+  background: rgb(217 119 6 / .2);
+  border-color: rgb(251 191 36 / .48);
+  color: #fde68a;
+}
+@media (hover: hover) {
+  .chord-beat-pair .beat-snap-action:hover { background: rgb(40 94 65 / .2); border-color: var(--keyboard-active); }
+  .chord-beat-pair .beat-snap-action[data-swap="true"]:hover { background: rgb(217 119 6 / .22); border-color: #d97706; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .chord-beat-pair button { transition: background-color 110ms var(--ease-ui-out, cubic-bezier(0.23, 1, 0.32, 1)), border-color 110ms ease, color 110ms ease; }
+}
+.beat-snap-locked { color: var(--keyboard-muted); }
+@media (pointer: coarse) { .chord-beat-pair { --beat-key-width: 44px; } }

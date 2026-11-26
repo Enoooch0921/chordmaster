@@ -94,6 +94,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-27',
+        title: 'Drag chords between beats and bars',
+        bullets: ['Drag a chord from 3& onto beat 3 or 4, or into another bar. Dropping onto another chord keeps both in place. Drag a chord to the trash to delete it and use Undo to restore it.']
+      },
+      {
+        version: '0.12.66',
         date: '2026-11-26',
         title: 'Move chords and review matching bars',
         bullets: ['Drag a chord left or right to change its beat. Review suggested positions once for pending bars in the same song with the same key, meter, and chord sequence.']
@@ -1382,6 +1388,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-27',
+        title: '和弦拖曳改拍與跨小節移動',
+        bullets: ['在譜面抓住 3& 的和弦，往左拖回第 3 拍，或往右拖到第 4 拍。也能跨小節移動。落點已有和弦時，兩顆和弦都保留原位。拖進垃圾桶刪除後可按撤銷。']
+      },
+      {
+        version: '0.12.66',
         date: '2026-11-26',
         title: '拖曳和弦換拍與同型小節核對',
         bullets: ['在譜面左右拖曳和弦即可換拍。遇到拍位待核的小節，可採用建議拍位，一次確認本曲內調性、拍號與和弦順序相同的待核小節。']

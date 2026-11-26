@@ -120,6 +120,11 @@ export const KEYBOARD_SHORTCUT_SECTIONS: KeyboardShortcutSection[] = [
         context: { en: 'Chord mode', zh: '和弦模式' }
       },
       {
+        keys: ['Option/Alt + ArrowLeft', 'Option/Alt + ArrowRight'],
+        action: { en: 'Nudge the selected chord by half a beat (add Shift for 16th)', zh: '將目前和弦向左或向右微調半拍（加 Shift 為十六分拍）' },
+        context: { en: 'Chord mode; returns offbeat chords like 3& onto beat 3 or 4', zh: '和弦模式；可將 3& 直接移回第 3 或第 4 拍正拍' }
+      },
+      {
         keys: ['Shift + Space'],
         action: { en: 'Insert a beat before the current beat', zh: '在目前拍前插入一拍' },
         context: { en: 'Chord mode', zh: '和弦模式' }

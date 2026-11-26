@@ -2,7 +2,7 @@ import { hasUnmeteredChords, transposeUnmeteredChordLines } from '../utils/unmet
 import { canCloseBar } from '../utils/closedBar';
 import { transposeChordPassVariants } from '../utils/chordPassVariants';
 import { reconcileChordSubdivisions, transposeChordSubdivisions } from '../utils/chordSubdivisions';
-import { canOffsetChord, setRawChordBeatOffset } from '../utils/chordBeatOffsets';
+import { canOffsetChord, getChordBeatOffset, setRawChordBeatOffset } from '../utils/chordBeatOffsets';
 /**
  * Pure immutable commands shared by the legacy editor and preview-first editor.
  * Long-lived edit targets use section/bar ids; array indexes never leave this
@@ -384,7 +384,7 @@ export const resolvePreviewChordSlotIndex = (
 ): number => {
   const safeRequestedSlot = Math.max(0, Math.min(beatCount - 1, requestedSlotIndex));
   const ownership = getChordDisplaySlotOwnership(bar.chords, beatCount);
-  if (!ownership.some(Boolean)) return 0;
+  if (!ownership.some(Boolean) && !bar.chordSubdivisions?.length) return 0;
   return ownership[safeRequestedSlot]?.ownerSlotIndex ?? safeRequestedSlot;
 };
 
@@ -491,6 +491,41 @@ export const setChordBeatOffset = (song: Song, target: SongChordTarget, value: n
     return setRawChordBeatOffset(bar, entry.rawIndex, value);
   })
 );
+
+/** Move the selected & onto its own beat, keeping the other harmony at its written time. */
+export function moveOffbeatToDownbeat(bar: Bar, beats: number, beat: number, chord: string): Bar {
+  if (bar.closed || bar.chordTimingUnspecified || hasUnmeteredChords(bar) || !canOffsetChord(chord)
+      || !Number.isInteger(beat) || beat < 0 || beat >= beats) return bar;
+  const owner = getChordDisplaySlotOwnership(bar.chords, beats)[beat];
+  if (owner?.covered) return bar;
+  const offset = owner && getChordBeatOffset(bar, owner.rawIndex);
+  const extras = bar.chordSubdivisions ?? [];
+  const offbeat = extras.find(entry => entry.beat === beat && entry.offset === 0.5);
+
+  if (offset === 0.5) {
+    return owner?.chord === chord && !offbeat ? setRawChordBeatOffset(bar, owner.rawIndex, 0) : bar;
+  }
+  if (offbeat?.chord !== chord || bar.chords.slice(beats).some(token => token.trim())) return bar;
+
+  const remaining = extras.filter(entry => entry !== offbeat);
+  if (owner) {
+    const mark = bar.chordMarks?.[owner.rawIndex];
+    // Secondary events cannot store a primary chord's colour or special mark.
+    if (mark?.color || mark?.special) return bar;
+    if (offset) {
+      remaining.push({ beat, offset, chord: owner.chord });
+      remaining.sort((a, b) => a.beat - b.beat || a.offset - b.offset);
+    } else if (owner.chord !== '/') {
+      return bar;
+    }
+  }
+  const chords = getChordBeatSlots(bar, beats).map(slot => slot.chord);
+  chords[beat] = chord;
+  const marks = remapChordMarksByBeat(bar, chords, beats);
+  if (marks) delete marks[beat];
+  return { ...bar, chords, chordMarks: marks && Object.keys(marks).length ? marks : undefined,
+    chordSubdivisions: remaining.length ? remaining : undefined };
+}
 
 export const getChordPlacementError = (
   song: Song,

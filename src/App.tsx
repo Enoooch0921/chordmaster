@@ -8,7 +8,7 @@ import { EMPTY_LIBRARY_FILTERS, libraryFilterCount, libraryKey, matchesLibraryFi
 import { searchItemsWithMatches } from './lib/songSearch';
 import { getSongLibraryMeta } from './lib/songLibraryPresentation';
 import SongTitle from './components/SongTitle';
-import { confirmChordTiming, indexTimingReviews, moveChordToBeat, type ChartTimingControls } from './lib/chordTimingReview';
+import { confirmChordTiming, indexTimingReviews, moveChordToBeat, transferChartChord, type ChartTimingControls } from './lib/chordTimingReview';
 import PersonalChordSheet from './components/PersonalChordSheet';
 import type { PracticeTuning } from './lib/practiceTuning';
 import PerformanceSetlistSheets, { type PerformanceSetlistHandle } from './components/PerformanceSetlistSheets';
@@ -9077,18 +9077,54 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     const current = activeDraftEditorSong;
     const next = edit.kind === 'review'
       ? confirmChordTiming(current, target, edit.review, edit.positions, true)
+      : edit.kind === 'transfer'
+        ? transferChartChord(current, { ...target, beats: edit.beats, beat: edit.source.beat }, edit.source, edit.destination)
       : updateBarById(current, target, bar => getBeatCount(current, bar) === edit.beats
-        ? moveChordToBeat(bar, edit.beats, edit.source, edit.to) : bar);
+        ? moveChordToBeat(bar, edit.beats, edit.source, edit.to, { targetOffset: edit.toOffset }) : bar);
     if (next === current) return;
+    const isDelete = edit.kind === 'transfer' && !edit.destination;
+    const previousUndo = isDelete ? globalHistory.getUndoEntry() : null;
     handleActiveEditorSongChange(next);
+    const buildUndoAction = () => {
+      const entry = activePreviewEditSession ? null : globalHistory.getUndoEntry();
+      const undo = activePreviewEditSession
+        ? () => setPreviewEditSession(session => session?.draftSong === next ? undoPreviewDraft(session) : session)
+        : entry && entry.id !== previousUndo?.id ? () => { void globalHistory.undo(entry.id); } : undefined;
+      return undo ? { label: language === 'zh' ? '撤銷' : 'Undo', run: undo } : undefined;
+    };
     if (edit.kind === 'review') {
       toast.success(language === 'zh' ? `已確認 ${edit.review.count} 個小節的拍位` : `Confirmed timing for ${edit.review.count} bars`, { id: 'chord-timing-review' });
-    } else if (activePreviewEditSession?.target.field === 'chords' && activePreviewEditSession.target.barId === target.barId
+    } else if (isDelete) {
+      toast.success(language === 'zh' ? '已刪除和弦' : 'Chord deleted', {
+        id: 'workspace-history-action', duration: 6500, action: buildUndoAction()
+      });
+    }
+    if (edit.kind === 'move' && activePreviewEditSession?.target.field === 'chords'
+        && activePreviewEditSession.target.barId === target.barId
         && activePreviewEditSession.target.sectionId === target.sectionId) {
       const entry = findSongBar(next, target)?.bar;
+      const destOffset = edit.toOffset ?? edit.source.offset;
       const rawChordIndex = entry ? getChordBeatSlots(entry, edit.beats)[edit.to]?.rawChordIndex ?? null : null;
-      handlePreviewNotationCursorChange({ kind: 'chord', slotIndex: edit.to, rawChordIndex,
-        auditionOffset: edit.source.offset, ...(edit.source.offset === 0.5 ? { editOffset: 0.5 } : {}) });
+      handlePreviewNotationCursorChange({
+        kind: 'chord',
+        slotIndex: edit.to,
+        rawChordIndex,
+        auditionOffset: destOffset,
+        ...(destOffset === 0 || destOffset === 0.5 ? { editOffset: destOffset } : {})
+      });
+    } else if (edit.kind === 'transfer' && edit.destination && activePreviewEditSession?.target.field === 'chords'
+        && activePreviewEditSession.target.barId === edit.destination.barId
+        && activePreviewEditSession.target.sectionId === edit.destination.sectionId) {
+      const entry = findSongBar(next, edit.destination)?.bar;
+      const destOffset = edit.destination.offset ?? edit.source.offset;
+      const rawChordIndex = entry ? getChordBeatSlots(entry, edit.destination.beats)[edit.destination.beat]?.rawChordIndex ?? null : null;
+      handlePreviewNotationCursorChange({
+        kind: 'chord',
+        slotIndex: edit.destination.beat,
+        rawChordIndex,
+        auditionOffset: destOffset,
+        ...(destOffset === 0 || destOffset === 0.5 ? { editOffset: destOffset } : {})
+      });
     }
   });
   const chartTiming = React.useMemo<ChartTimingControls | undefined>(() => {
@@ -10086,7 +10122,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                   slotIndex,
                   rawChordIndex,
                   ...(target?.cursor?.kind === 'chord' ? {
-                    orderedIndex: target.cursor.orderedIndex, auditionOffset: target.cursor.auditionOffset
+                    orderedIndex: target.cursor.orderedIndex, auditionOffset: target.cursor.auditionOffset,
+                    editOffset: target.cursor.auditionOffset === 0.25 || target.cursor.auditionOffset === 0.5 || target.cursor.auditionOffset === 0.75
+                      ? target.cursor.auditionOffset
+                      : target.cursor.editOffset
                   } : {})
                 };
           const fallbackNotationAnchorKey = requestedNotationMode && requestedNotationMode !== 'chords'

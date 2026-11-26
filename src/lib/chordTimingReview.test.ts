@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Bar, Song } from '../types';
-import { confirmChordTiming, indexTimingReviews, moveChordToBeat, timingBarKey } from './chordTimingReview';
+import { confirmChordTiming, indexTimingReviews, inspectChartChordDrop, moveChordToBeat, transferChartChord, timingBarKey } from './chordTimingReview';
 
 const pending = (id: string, patch: Partial<Bar> = {}): Bar => ({
   id, chords: ['D/F#', 'G'], chordTimingUnspecified: true, ...patch
@@ -62,5 +62,105 @@ describe('chord timing review', () => {
       .toEqual([{ chord: 'A', beat: 3, offset: 0.5 }]);
     const rests: Bar = { chords: ['0h', '', 'G', ''] };
     expect(moveChordToBeat(rests, 4, { chord: 'G', beat: 2, offset: 0 }, 1)).toBe(rests);
+  });
+});
+
+describe('cross-measure chord drag', () => {
+  const origin = { sectionId: 's', barId: 'a', beats: 4, beat: 2 };
+  const source = { chord: 'G/B', offset: 0.5, beat: 2 };
+  const destination = { sectionId: 'bridge', barId: 'b', beats: 3, beat: 1 };
+  function fixture() {
+    const song = score([{ id: 'a', chords: ['D', 'G/B'], chordMarks: { 1: { beatOffset: 0.5, color: 'rose', special: true } },
+      riff: '1 2', chordSubdivisions: [{ chord: 'A', beat: 2, offset: 0.75 }] }]);
+    song.sections.push({ id: 'bridge', title: 'Bridge', bars: [{ id: 'b', chords: ['C', '/', ''], timeSignature: '3/4', annotation: 'keep' }] });
+    return song;
+  }
+  it('moves a compact, marked slash chord into another section and meter as a single song edit', () => {
+    const song = fixture();
+    const next = transferChartChord(song, origin, source, destination);
+    expect(next.sections[0].bars[0]).toEqual({ ...song.sections[0].bars[0], chords: ['D', '', '', ''], chordMarks: undefined });
+    expect(next.sections[1].bars[0]).toEqual({ ...song.sections[1].bars[0], chords: ['C', 'G/B', ''], chordMarks: { 1: song.sections[0].bars[0].chordMarks![1] } });
+    expect(song.sections[0].bars[0].chords).toEqual(['D', 'G/B']);
+  });
+  it('drops or deletes only the selected subdivision and keeps the primary chord and other notation', () => {
+    const song = fixture();
+    const extra = { chord: 'A', beat: 2, offset: 0.75 };
+    const moved = transferChartChord(song, origin, extra, destination);
+    expect(moved.sections[0].bars[0]).toEqual({ ...song.sections[0].bars[0], chordSubdivisions: undefined });
+    expect(moved.sections[1].bars[0].chordSubdivisions).toEqual([{ ...extra, beat: 1 }]);
+    const deleted = transferChartChord(song, origin, extra, null);
+    expect(deleted.sections[0]).toEqual(moved.sections[0]);
+    expect(deleted.sections[1]).toBe(song.sections[1]);
+    expect(transferChartChord(song, origin, source, null).sections[0].bars[0]).toEqual({ ...song.sections[0].bars[0], chords: ['D', '', '', ''], chordMarks: undefined });
+  });
+  it('rejects collisions, protected measures and stale events without removing the source', () => {
+    for (const patch of [{ chords: ['', 'F', ''] }, { chords: ['0h'] }, { chords: ['%'] }, { closed: true },
+      { chordTimingUnspecified: true }, { chordSubdivisions: [{ beat: 1, offset: 0.5 as const, chord: 'F' }] },
+      { chordMarks: { 1: { special: true } } }]) {
+      const song = fixture();
+      Object.assign(song.sections[1].bars[0], patch);
+      expect(transferChartChord(song, origin, source, destination)).toBe(song);
+    }
+    const song = fixture();
+    expect(transferChartChord(song, origin, { ...source, chord: 'Am' }, null)).toBe(song);
+    expect(transferChartChord(song, origin, source, { ...destination, beats: 4 })).toBe(song);
+  });
+
+  it('moves 3&, 3e, and 3a onto downbeats within the same bar or across bars and preserves marks', () => {
+    const song = fixture();
+    // Primary 3& -> beat 3 downbeat keeps color + special
+    const toBeat3 = transferChartChord(song, origin, source, { ...origin, beat: 2, offset: 0 });
+    expect(toBeat3.sections[0].bars[0]).toMatchObject({
+      chords: ['D', '', 'G/B', ''],
+      chordMarks: { 2: { color: 'rose', special: true } }
+    });
+    // Primary 3& -> beat 4 downbeat
+    const toBeat4 = transferChartChord(song, origin, source, { ...origin, beat: 3, offset: 0 });
+    expect(toBeat4.sections[0].bars[0]).toMatchObject({
+      chords: ['D', '', '', 'G/B'],
+      chordMarks: { 3: { color: 'rose', special: true } }
+    });
+    // Subdivision 3a (0.75) -> beat 4 downbeat
+    const extra = { chord: 'A', beat: 2, offset: 0.75 };
+    const extraTo4 = moveChordToBeat(song.sections[0].bars[0], 4, extra, 3, { targetOffset: 0 });
+    expect(extraTo4.chords).toEqual(['D', '', 'G/B', 'A']);
+    expect(extraTo4.chordSubdivisions).toBeUndefined();
+    // Cross-bar 3& -> Bridge bar beat 2 downbeat (offset 0)
+    const crossDownbeat = transferChartChord(song, origin, source, { ...destination, offset: 0 });
+    expect(crossDownbeat.sections[1].bars[0]).toMatchObject({
+      chords: ['C', 'G/B', ''],
+      chordMarks: { 1: { color: 'rose', special: true } }
+    });
+  });
+
+  it('supports lossless swap within a bar and across bars while protecting marked chords from demotion loss', () => {
+    const bar: Bar = { id: 'a', chords: ['C', '', 'Am', ''], chordSubdivisions: [{ beat: 2, offset: 0.5, chord: 'G' }] };
+    const swapped = moveChordToBeat(bar, 4, { chord: 'G', beat: 2, offset: 0.5 }, 2, { targetOffset: 0, swap: true });
+    expect(swapped.chords).toEqual(['C', '', 'G', '']);
+    expect(swapped.chordSubdivisions).toEqual([{ beat: 2, offset: 0.5, chord: 'Am' }]);
+
+    // If Am carries a color mark, demoting Am into chordSubdivisions would lose it -> safely refuse
+    const markedBar: Bar = { ...bar, chordMarks: { 2: { color: 'rose' } } };
+    expect(moveChordToBeat(markedBar, 4, { chord: 'G', beat: 2, offset: 0.5 }, 2, { targetOffset: 0, swap: true })).toBe(markedBar);
+
+    // Cross-bar swap & drop inspection
+    const song = score([
+      { id: 'a', chords: ['C', '', '', ''], chordSubdivisions: [{ beat: 2, offset: 0.5, chord: 'G' }] },
+      { id: 'b', chords: ['Am', '', 'F', ''], chordMarks: { 0: { color: 'emerald' } } }
+    ]);
+    const fromA = { sectionId: 's', barId: 'a', beats: 4, beat: 2 };
+    const toB = { sectionId: 's', barId: 'b', beats: 4, beat: 0, offset: 0 as const };
+    const moveG = { chord: 'G', beat: 2, offset: 0.5 };
+    expect(inspectChartChordDrop(song, fromA, moveG, toB, { swap: true })).toBe('swap');
+    expect(inspectChartChordDrop(song, fromA, moveG, { ...toB, beat: 1 }, { swap: true })).toBe('allow');
+    expect(inspectChartChordDrop(song, fromA, moveG, { ...fromA, offset: 0.5 }, { swap: true })).toBe('same');
+    const swappedSong = transferChartChord(song, fromA, moveG, toB, { swap: true });
+    expect(swappedSong.sections[0].bars[1].chords[0]).toBe('G');
+    expect(swappedSong.sections[0].bars[1].chordMarks).toBeUndefined();
+    expect(swappedSong.sections[0].bars[0]).toMatchObject({
+      chords: ['C', '', 'Am', ''],
+      chordMarks: { 2: { beatOffset: 0.5, color: 'emerald' } },
+      chordSubdivisions: undefined
+    });
   });
 });

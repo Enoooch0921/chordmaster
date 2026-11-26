@@ -217,6 +217,23 @@ it('uses a normally clicked bar as the Shift anchor and keeps that anchor on rep
   expect(selection()).toEqual(['bar-0', 'bar-1', 'bar-2']);
 }, 15000);
 
+it.each(['songs', 'setlists'])('moves a chart-selected additional 3& onto beat 3 with one undo in %s', async mode => {
+  fixture.songs[0].sections[0].bars[0] = {id: 'bar-0', chords: [],
+    chordSubdivisions: [{beat: 2, offset: 0.5, chord: 'G/B'}]};
+  await start(mode);
+  const chartChord = (offset: number) => bar(0).querySelector<HTMLElement>(
+    `[data-move-chord="G/B"][data-move-beat="2"][data-move-offset="${offset}"]`);
+  fireEvent.click(chartChord(0.5)!);
+  expect(screen.getByRole('button', {name: '第 3 拍反拍', pressed: true})).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', {name: '移到第 3 拍'}));
+  expect(chartChord(0)).toBeInTheDocument();
+  expect(chartChord(0.5)).toBeNull();
+  expect(screen.getByRole('button', {name: '第 3 拍正拍', pressed: true})).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', {name: 'Undo'}));
+  expect(chartChord(0.5)).toBeInTheDocument();
+  expect(chartChord(0)).toBeNull();
+}, 15000);
+
 it('retains chord and rhythm selection across the subdivision editor and mode switches', async () => {
   fixture.songs[0].sections[0].bars[0] = { id: 'bar-0', chords: ['Gmaj7', '/', 'G', 'G/B'], rhythm: 'e3r e q e e q', chordSubdivisions: [{ beat: 2, offset: .5, chord: 'Am' }] };
   await start();
@@ -321,6 +338,24 @@ it('inserts before a bar inside a draft without losing input and supports draft 
   expect(bar(0).querySelector('[data-chord-root]')?.textContent).toBe('C');
 }, 15000);
 
+it.each(['songs', 'setlists'])('moves into the next measure, deletes only the chord, and undoes both steps in %s', async mode => {
+  const bars = fixture.songs[0].sections[0].bars;
+  bars[0].chords = ['C', '', '', 'Am'];
+  bars[1].chords = [];
+  await start(mode);
+  const chord = (i: number) => bar(i).querySelector<HTMLElement>('[data-move-chord="Am"]');
+  fireEvent.keyDown(chord(0)!, { key: 'ArrowRight' });
+  await waitFor(() => expect(chord(1)).toHaveAttribute('data-move-beat', '0'));
+  expect(chord(0)).toBeNull();
+  fireEvent.keyDown(chord(1)!, { key: 'Delete' });
+  await waitFor(() => expect(chord(1)).toBeNull());
+  fireEvent.click(await screen.findByRole('button', { name: '撤銷' }));
+  await waitFor(() => expect(chord(1)).toBeTruthy());
+  fireEvent.click(document.querySelector<HTMLButtonElement>('[data-preview-undo]')!);
+  await waitFor(() => expect(chord(0)).toHaveAttribute('data-move-beat', '3'));
+  expect(chord(1)).toBeNull();
+}, 15000);
+
 it.each(['songs', 'setlists'])('moves a suggested chord in all matching pending bars with a single undo in %s', async mode => {
   const bars = fixture.songs[0].sections[0].bars;
   bars[0] = { id: 'bar-0', chords: ['D/F#', '/', 'G', '/'] };
@@ -335,4 +370,24 @@ it.each(['songs', 'setlists'])('moves a suggested chord in all matching pending 
   fireEvent.click(document.querySelector<HTMLButtonElement>('[data-preview-undo]')!);
   await waitFor(() => expect(bar(1).querySelector('[data-timing-review]')).toBeInTheDocument());
   expect(bar(2).querySelector('[data-timing-review]')).toBeInTheDocument();
+}, 15000);
+
+it('nudges a focused 3& chord onto beat 3 downbeat and 4& across into bar 2 beat 1 with Alt+Arrow keys', async () => {
+  const bars = fixture.songs[0].sections[0].bars;
+  bars[0] = { id: 'bar-0', chords: ['C', '', '', ''], chordSubdivisions: [{ beat: 2, offset: 0.5, chord: 'G' }, { beat: 3, offset: 0.5, chord: 'F' }] };
+  bars[1] = { id: 'bar-1', chords: [], chordSubdivisions: [{ beat: 0, offset: 0.5, chord: 'Am' }] };
+  await start('songs');
+
+  const gOff = bar(0).querySelector<HTMLElement>('[data-move-chord="G"][data-move-beat="2"][data-move-offset="0.5"]')!;
+  fireEvent.keyDown(gOff, { key: 'ArrowLeft', altKey: true });
+  await waitFor(() => expect(bar(0).querySelector('[data-move-chord="G"][data-move-beat="2"][data-move-offset="0"]')).toBeInTheDocument());
+
+  const fOff = bar(0).querySelector<HTMLElement>('[data-move-chord="F"][data-move-beat="3"][data-move-offset="0.5"]')!;
+  fireEvent.keyDown(fOff, { key: 'ArrowRight', altKey: true });
+  await waitFor(() => expect(bar(1).querySelector('[data-move-chord="F"][data-move-beat="0"][data-move-offset="0"]')).toBeInTheDocument());
+  expect(bar(0).querySelector('[data-move-chord="F"]')).toBeNull();
+  const movedF = bar(1).querySelector<HTMLElement>('[data-move-chord="F"]')!;
+  fireEvent.keyDown(movedF, { key: 'ArrowRight', altKey: true });
+  expect(movedF).toHaveAttribute('data-move-offset', '0');
+  expect(bar(1).querySelector('[data-move-chord="Am"]')).toHaveAttribute('data-move-offset', '0.5');
 }, 15000);

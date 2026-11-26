@@ -37,6 +37,7 @@ import {
   pasteBarsAtBar,
   repairSongStructure,
   resolvePreviewChordSlotIndex,
+  moveOffbeatToDownbeat,
   reorderSection,
   serializeChordBeatSlots,
   setChordAtBeatSlot,
@@ -1105,4 +1106,30 @@ it('replaces only one beat with two or four chords and clears its previous offse
   expect(getChordDisplaySlots(four.sections[0].bars[0].chords, 4)).toEqual(['C', '/', 'G', 'G/B']);
   expect(setChordRunAtBeatSlot(four, target, ['G']).sections[0].bars[0].chordSubdivisions).toHaveLength(1);
   expect(source.sections[0].bars[0].chordMarks?.[2]?.beatOffset).toBe(.5);
+});
+
+describe('moveOffbeatToDownbeat', () => {
+  it('clears only the offset of a primary chord on a compact legacy beat grid', () => {
+    const bar: Bar = {chords: ['C', 'G/B'], chordMarks: {1: {beatOffset: 0.5, color: 'rose', special: true}}};
+    expect(moveOffbeatToDownbeat(bar, 4, 2, 'G/B')).toEqual({...bar, chordMarks: {1: {color: 'rose', special: true}}});
+  });
+
+  it('promotes an additional chord over a counting slash and preserves the rest of the measure', () => {
+    const bar: Bar = {chords: ['C','/','/','F'], chordMarks: {3:{special:true}}, annotation: 'Keep',
+      chordSubdivisions: [{beat:2,offset:0.5,chord:'G/B'}, {beat:2,offset:0.75,chord:'Dm'}]};
+    expect(moveOffbeatToDownbeat(bar, 4, 2, 'G/B')).toEqual({...bar,
+      chords:['C','/','G/B','F'], chordSubdivisions:[{beat:2,offset:0.75,chord:'Dm'}]});
+    for (const token of ['D','0','0h','%']) {
+      const occupied = {...bar, chords:['C','/',token,'F']};
+      expect(moveOffbeatToDownbeat(occupied,4,2,'G/B')).toBe(occupied);
+    }
+    const stale = moveOffbeatToDownbeat(bar,4,2,'Am');
+    expect(stale).toBe(bar);
+  });
+
+  it('keeps an earlier attack in the same beat when promoting the &', () => {
+    const bar: Bar = {chords:['C','G'],chordMarks:{1:{beatOffset:0.25}},chordSubdivisions:[{beat:2,offset:0.5,chord:'Dm'}]};
+    expect(moveOffbeatToDownbeat(bar,4,2,'Dm')).toEqual({...bar,chords:['C','','Dm',''],chordMarks:undefined,
+      chordSubdivisions:[{beat:2,offset:0.25,chord:'G'}]});
+  });
 });

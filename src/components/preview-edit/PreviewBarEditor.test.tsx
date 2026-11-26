@@ -1642,11 +1642,11 @@ describe('PreviewBarEditor', () => {
     expect(capture).toHaveValue('C11');
   });
 
-  it('leaves modified arrows and IME arrows to native chord text input', () => {
+  it('leaves meta/ctrl arrows and IME arrows to native chord text input', () => {
     const { onNavigate } = renderEditor();
     const capture = screen.getByRole('textbox', { name: '和弦直接輸入' });
     for (const key of ['ArrowLeft', 'ArrowRight']) {
-      for (const modifier of [{ metaKey: true }, { ctrlKey: true }, { altKey: true }, { isComposing: true }]) {
+      for (const modifier of [{ metaKey: true }, { ctrlKey: true }, { isComposing: true }]) {
         expect(fireEvent.keyDown(capture, { key, ...modifier })).toBe(true);
       }
     }
@@ -2098,4 +2098,100 @@ it.each(['phone','tablet','desktop'] as const)('keeps one shared copy/paste/dele
     expect(row.querySelector('[data-keyboard-edit-action="paste"]')).toBeDisabled();
     expect(document.querySelectorAll('[data-keyboard-edit-action="delete"]')).toHaveLength(1);
   }
+});
+
+describe('offbeat relocation, bidirectional beat strip, and Alt+Arrow nudging', () => {
+  it('offers bidirectional move to beat 4 and swap with beat 3 when beat 3 is occupied', async () => {
+    const user = userEvent.setup();
+    const source: Song = {
+      ...song,
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [{ id: 'bar-1', chords: ['C', '', 'Am', ''], chordSubdivisions: [{ beat: 2, offset: 0.5, chord: 'G' }] }]
+      }]
+    };
+    const offbeatTarget = {
+      ...target,
+      slotIndex: 2,
+      rawChordIndex: 2,
+      cursor: { kind: 'chord' as const, slotIndex: 2, rawChordIndex: 2, editOffset: 0.5 as const, auditionOffset: 0.5 }
+    };
+    const { onApplyDraft, onNotationCursorChange } = renderEditor({
+      session: createPreviewEditSession({ song: source, target: offbeatTarget, inputMode: 'letters' })
+    });
+
+    // Left action offers swap with occupied beat 3; right action offers move to empty beat 4
+    expect(screen.getByRole('button', { name: '與第 3 拍互換' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '移到第 4 拍' }));
+    const movedTo4 = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(movedTo4.sections[0].bars[0].chords).toEqual(['C', '', 'Am', 'G']);
+    expect(movedTo4.sections[0].bars[0].chordSubdivisions).toBeUndefined();
+    expect(onNotationCursorChange).toHaveBeenLastCalledWith(expect.objectContaining({ slotIndex: 3, editOffset: 0, auditionOffset: 0 }));
+
+    // Clicking swap exchanges Am (beat 3) and G (3&)
+    await user.click(screen.getByRole('button', { name: '與第 3 拍互換' }));
+    const swapped = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(swapped.sections[0].bars[0].chords).toEqual(['C', '', 'G', '']);
+    expect(swapped.sections[0].bars[0].chordSubdivisions).toEqual([{ beat: 2, offset: 0.5, chord: 'Am' }]);
+  });
+
+  it('nudges selected chord by half a beat with Alt+ArrowLeft/Right and 16th with Alt+Shift+ArrowLeft', () => {
+    const source: Song = {
+      ...song,
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [{ id: 'bar-1', chords: ['C', '', '', ''], chordSubdivisions: [{ beat: 2, offset: 0.5, chord: 'G' }] }]
+      }]
+    };
+    let current = createPreviewEditSession({
+      song: source,
+      target: {
+        ...target,
+        slotIndex: 2,
+        rawChordIndex: null,
+        cursor: { kind: 'chord', slotIndex: 2, rawChordIndex: null, editOffset: 0.5, auditionOffset: 0.5 }
+      },
+      inputMode: 'letters'
+    });
+    const { onApplyDraft, rerenderSession } = renderEditor({ session: current });
+    const capture = screen.getByRole('textbox', { name: '和弦直接輸入' });
+
+    fireEvent.keyDown(capture, { key: 'ArrowLeft', altKey: true });
+    let nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(nextSong.sections[0].bars[0].chords).toEqual(['C', '', 'G', '']);
+    expect(nextSong.sections[0].bars[0].chordSubdivisions).toBeUndefined();
+
+    // Alt+Shift+ArrowRight from beat 3 (0) nudges to 3e (0.25)
+    current = applyPreviewDraft(
+      { ...current, target: { ...target, slotIndex: 2, rawChordIndex: 2, cursor: { kind: 'chord', slotIndex: 2, rawChordIndex: 2, editOffset: 0, auditionOffset: 0 } } },
+      nextSong
+    );
+    rerenderSession(current);
+    fireEvent.keyDown(capture, { key: 'ArrowRight', altKey: true, shiftKey: true });
+    nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(nextSong.sections[0].bars[0].chordMarks).toEqual({ 2: { beatOffset: 0.25 } });
+  });
+
+  it('allows promoting a subdivision back to downbeat from the &+ editor', async () => {
+    const user = userEvent.setup();
+    const source: Song = {
+      ...song,
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [{ id: 'bar-1', chords: ['C', '', '', ''], chordSubdivisions: [{ beat: 2, offset: 0.5, chord: 'G' }] }]
+      }]
+    };
+    const { onApplyDraft } = renderEditor({
+      session: createPreviewEditSession({ song: source, target, inputMode: 'letters' })
+    });
+    await user.click(screen.getByRole('button', { name: '拍內和弦與休止' }));
+    const posSelect = screen.getByRole('combobox', { name: '追加和弦 1 拍位' });
+    await user.selectOptions(posSelect, '2');
+    const promoted = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(promoted.sections[0].bars[0].chords).toEqual(['C', '', 'G', '']);
+    expect(promoted.sections[0].bars[0].chordSubdivisions).toBeUndefined();
+  });
 });
