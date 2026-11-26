@@ -452,3 +452,14 @@
 .audition-delay span { display: flex; align-items: baseline; justify-content: space-between; }
 .audition-delay output { font-variant-numeric: tabular-nums; color: var(--keyboard-muted); }
 .audition-delay input { width: 100%; accent-color: var(--keyboard-active); }
+
+.chord-beat-strip { position: relative; display: flex; flex: none; gap: 4px; padding: 3px 8px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; border-bottom: 1px solid var(--keyboard-border); }
+.chord-beat-pair { --beat-key-width: 32px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); flex: 1 0 0; min-width: var(--beat-key-width); }
+.chord-beat-pair[data-split] { min-width: calc(2 * var(--beat-key-width)); }
+.chord-beat-pair button { display: grid; align-content: center; min-width: 0; min-height: 40px; padding: 2px; border-radius: 5px; font-variant-numeric: tabular-nums; line-height: 1.1; font-size: 13px; font-weight: 650; color: var(--keyboard-text); touch-action: manipulation; cursor: pointer; }
+.chord-beat-pair button:nth-child(2) { font-weight: 450; color: var(--keyboard-muted); }
+.chord-beat-value { min-height: 1.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.chord-beat-pair button[aria-pressed="true"] { font-weight: 750; color: white; background: var(--keyboard-active); }
+.chord-beat-pair button:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }
+.chord-beat-pair button:disabled { opacity: .4; cursor: default; }
+@media (pointer: coarse) { .chord-beat-pair { --beat-key-width: 40px; } }

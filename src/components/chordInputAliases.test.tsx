@@ -1,7 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Bar } from '../types';
-import ChordPassVariantsEditor from './ChordPassVariantsEditor';
 import ChordSubdivisionsEditor from './ChordSubdivisionsEditor';
 import UnmeteredChordsEditor from './UnmeteredChordsEditor';
 
@@ -29,34 +28,24 @@ describe('manual chord quality aliases in additional editors', () => {
     expect(bar.chordSubdivisions?.[0].chord).toBe('G/B');
   });
 
-  it('normalizes only the edited pass chord without changing the primary harmony or other passes', () => {
-    const bar: Bar = {
-      chords: ['C', '', 'G/B', ''],
-      chordPassVariants: [
-        {
-          pass: 2,
-          chords: ['D-7', '', 'G7', ''],
-          chordSubdivisions: [{ beat: 0, offset: 0.5, chord: 'C(add9)' }]
-        },
-        { pass: 3, chords: ['Em7-5', '', '', ''] }
-      ]
-    };
+  it.each([['2e', 0.25], ['2a', 0.75]] as const)('adds %s directly while keeping the existing offbeat', (position, offset) => {
+    const original: Bar = { chords: ['C', 'G', '', ''], chordSubdivisions: [{ beat: 1, offset: 0.5, chord: 'Am' }] };
     const onChange = vi.fn();
-    render(<ChordPassVariantsEditor bar={bar} beats={4} language="zh" onChange={onChange} />);
-    expect(onChange).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByRole('textbox', { name: '第2遍 第3拍和弦' }), {
-      target: { value: 'Em7-5/Bb' }
-    });
-    expect(onChange).toHaveBeenLastCalledWith([
-      {
-        pass: 2,
-        chords: ['D-7', '', 'Em7b5/Bb', ''],
-        chordSubdivisions: [{ beat: 0, offset: 0.5, chord: 'C(add9)' }]
-      },
-      { pass: 3, chords: ['Em7-5', '', '', ''] }
-    ]);
-    expect(bar.chords).toEqual(['C', '', 'G/B', '']);
-    expect(bar.chordPassVariants?.[0].chords[2]).toBe('G7');
+    const field = (bar: Bar) => <ChordSubdivisionsEditor bar={bar} beats={4} selectedBeat={1} language="zh" onChange={onChange} />;
+    const { rerender } = render(field(original));
+    expect(screen.queryByRole('button', { name: position })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '選擇其他拍位' }));
+    expect(screen.queryByRole('button', { name: '2&' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: position }));
+    expect(screen.queryByRole('group', { name: '可新增的拍位' })).not.toBeInTheDocument();
+    const entries = onChange.mock.lastCall![0];
+    expect(entries).toEqual([...original.chordSubdivisions!, { beat: 1, offset, chord: 'C' }]);
+    rerender(field({ ...original, chordSubdivisions: entries }));
+    const input = screen.getByRole('textbox', { name: '追加和弦 2' }) as HTMLInputElement;
+    expect(input).toHaveFocus();
+    expect(input.selectionEnd! - input.selectionStart!).toBe(input.value.length);
+    fireEvent.change(input, { target: { value: 'F#m' } });
+    expect(onChange.mock.lastCall![0][1]).toEqual({ beat: 1, offset, chord: 'F#m' });
   });
 
   it.each([false, true])('normalizes typed unmetered chords while preserving lines and input spacing (withinMeasure=%s)', withinMeasure => {

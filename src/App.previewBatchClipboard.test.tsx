@@ -223,7 +223,7 @@ it('retains chord and rhythm selection across the subdivision editor and mode sw
   fireEvent.click(bar(0).querySelector('[data-chord-event-position="3"]')!);
   const selected = () => bar(0).querySelector('.preview-section-active-chord');
   expect(selected()).toHaveAttribute('data-preview-slot-index', '2');
-  const toggle = screen.getByRole('button', { name: '拍內和弦與指定遍數和弦' });
+  const toggle = screen.getByRole('button', { name: '拍內和弦與休止' });
   fireEvent.click(toggle);
   fireEvent.click(toggle);
   expect(selected()).toHaveAttribute('data-preview-slot-index', '2');
@@ -231,8 +231,8 @@ it('retains chord and rhythm selection across the subdivision editor and mode sw
   fireEvent.click(within(bar(0)).getByRole('button', { name: 'Select rhythm note 4' }));
   const cursor = bar(0).querySelector('[data-rhythm-cursor-unit]')?.getAttribute('data-rhythm-cursor-unit');
   fireEvent.click(screen.getByRole('button', { name: '切換到和弦' }));
-  fireEvent.click(screen.getByRole('button', { name: '拍內和弦與指定遍數和弦' }));
-  fireEvent.click(screen.getByRole('button', { name: '拍內和弦與指定遍數和弦' }));
+  fireEvent.click(screen.getByRole('button', { name: '拍內和弦與休止' }));
+  fireEvent.click(screen.getByRole('button', { name: '拍內和弦與休止' }));
   expect(selected()).toHaveAttribute('data-preview-slot-index', '2');
   fireEvent.click(screen.getByRole('button', { name: '切換到節奏' }));
   expect(bar(0).querySelector('[data-rhythm-cursor-unit]')).toHaveAttribute('data-rhythm-cursor-unit', cursor);

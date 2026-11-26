@@ -115,6 +115,11 @@ export const KEYBOARD_SHORTCUT_SECTIONS: KeyboardShortcutSection[] = [
         context: { en: 'Chord input: Tab goes forward; Shift + Tab goes back', zh: '和弦輸入：Tab 往後，Shift + Tab 往前' }
       },
       {
+        keys: ['&'],
+        action: { en: 'Enter a chord on the second half of this beat', zh: '輸入目前這拍的後半拍和弦' },
+        context: { en: 'Chord mode', zh: '和弦模式' }
+      },
+      {
         keys: ['Shift + Space'],
         action: { en: 'Insert a beat before the current beat', zh: '在目前拍前插入一拍' },
         context: { en: 'Chord mode', zh: '和弦模式' }

@@ -29,6 +29,8 @@ export interface PreviewChordCursor {
   /** Local audition selection within an ordered line or a subdivided beat. */
   orderedIndex?: number;
   auditionOffset?: number;
+  /** Explicit beat-strip selection edits a single chord, independent of a typed run. */
+  editOffset?: 0 | 0.5;
   slotIndex: number;
   rawChordIndex: number | null;
 }

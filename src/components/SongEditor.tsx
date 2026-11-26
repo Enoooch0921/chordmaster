@@ -4,7 +4,6 @@ import { hasDoubleBarline } from '../utils/barlines';
 import TempoChangeControl from './TempoChangeControl';
 import UnmeteredChordsEditor from './UnmeteredChordsEditor';
 import { hasUnmeteredChords, transposeUnmeteredChordLines } from '../utils/unmeteredChords';
-import ChordPassVariantsEditor from './ChordPassVariantsEditor';
 import { transposeChordPassVariants } from '../utils/chordPassVariants';
 import { getChordAnchorSlotIndexes } from '../utils/chordSlots';
 import ChordSubdivisionsEditor from './ChordSubdivisionsEditor';
@@ -1583,7 +1582,6 @@ const SongEditor: React.FC<Props> = ({
 
         <div className="space-y-3">
           {!bar.chordTimingUnspecified&&<ChordSubdivisionsEditor bar={bar} beats={Number(getEffectiveTimeSignatureForBar(song,bar).split('/')[0]) || 4} language={language} onChange={chordSubdivisions => updateBar(sIdx,bIdx,{chordSubdivisions})}/>}
-          {!bar.chordTimingUnspecified&&<ChordPassVariantsEditor bar={bar} beats={Number(getEffectiveTimeSignatureForBar(song,bar).split('/')[0]) || 4} language={language} onChange={chordPassVariants => updateBar(sIdx,bIdx,{chordPassVariants})}/>}
           <div>
             <div className="mb-1 text-[10px] font-bold uppercase text-gray-400">{copy.editor.chordColors}</div>
             {visibleChordEntries.length > 0 ? (

@@ -78,6 +78,42 @@ const renderEditor = ({
   };
 };
 
+it('writes a directly selected offbeat without replacing the beat or its other subdivisions', () => {
+  const seed = { ...song, sections: [{ ...song.sections[0], bars: [{id: 'bar-1', chords: ['C', 'Am7', '', ''],
+    chordSubdivisions: [{beat: 1, offset: 0.5 as const, chord: 'G'}, {beat: 1, offset: 0.75 as const, chord: 'Em'}]}] }] };
+  const session = createPreviewEditSession({song:seed, target, inputMode:'letters'});
+  const editor = renderEditor({session});
+  fireEvent.click(screen.getByRole('button', {name:'第 2 拍反拍'}));
+  const cursor = editor.onNotationCursorChange.mock.lastCall![0];
+  editor.rerenderSession({...session, target:{...target, cursor}});
+  const input = screen.getByRole('textbox', {name:'和弦直接輸入'});
+  fireEvent.change(input, {target:{value:'F/G'}});
+  const next = editor.onApplyDraft.mock.lastCall![0] as Song;
+  expect(next.sections[0].bars[0]).toMatchObject({chords:['C','Am7','',''], chordSubdivisions:[
+    {beat:1,offset:0.5,chord:'F/G'}, {beat:1,offset:0.75,chord:'Em'}
+  ]});
+  editor.rerenderSession({...session, target:{...target,cursor}, draftSong:next});
+  expect(input).toHaveValue('F/G');
+  fireEvent.change(input, {target:{value:''}});
+  expect(editor.onApplyDraft.mock.lastCall![0].sections[0].bars[0].chordSubdivisions).toEqual([{beat:1,offset:0.75,chord:'Em'}]);
+});
+
+it('selects the current offbeat with the ampersand key without writing a chord', () => {
+  const session = createPreviewEditSession({song, target, inputMode:'letters'});
+  const editor = renderEditor({session});
+  const strip = within(screen.getByRole('group', {name:'和弦拍位'}));
+  expect(strip.getAllByRole('button')).toHaveLength(4);
+  fireEvent.keyDown(screen.getByRole('textbox', {name:'和弦直接輸入'}), {key:'&', shiftKey:true});
+  expect(editor.onNotationCursorChange).toHaveBeenCalledWith(expect.objectContaining({slotIndex:target.slotIndex, editOffset:0.5}));
+  expect(editor.onApplyDraft).not.toHaveBeenCalled();
+  const cursor = editor.onNotationCursorChange.mock.lastCall![0];
+  editor.rerenderSession({...session, target:{...target, cursor}});
+  expect(strip.getAllByRole('button', {name:/反拍/})).toHaveLength(1);
+  expect(strip.getByRole('button', {name:'第 2 拍反拍', pressed:true})).toHaveTextContent('2&');
+  editor.rerenderSession(session);
+  expect(strip.queryByRole('button', {name:/反拍/})).not.toBeInTheDocument();
+});
+
 it('updates the shared selection indicator immediately across notation and text modes', () => {
   const base = createPreviewEditSession({ song, target, inputMode: 'letters' });
   const { rerenderSession, onNotationModeChange } = renderEditor({ session: base, deviceLayout: 'tablet' });
@@ -294,13 +330,14 @@ describe('PreviewBarEditor', () => {
     expect((onApplyDraft.mock.calls.at(-1)![0] as Song).sections[0].bars[0]).toMatchObject({ singleBar: undefined, doubleBar: true });
   });
 
-  it.each(['desktop', 'phone'] as const)('edits second-pass chords on %s while preserving first-pass harmony', deviceLayout => {
+  it.each(['desktop', 'phone'] as const)('adds an offbeat on %s while preserving legacy numbered passes', deviceLayout => {
     const source: Song = {...song, sections:[{...song.sections[0], bars:[{...song.sections[0].bars[0], chords:['C','','C/E',''], chordPassVariants:[{pass:2,chords:['C/E','','C7','']}]}]}]};
     const session=createPreviewEditSession({song:source,target:{...target,slotIndex:0,rawChordIndex:0},inputMode:'letters'});
     const {onApplyDraft}=renderEditor({session,deviceLayout});
-    fireEvent.click(screen.getByRole('button', { name: '拍內和弦與指定遍數和弦' }));
-    fireEvent.change(screen.getByRole('textbox',{name:'第2遍 第3拍和弦'}),{target:{value:'G7'}});
-    expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0]).toMatchObject({chords:['C','','C/E',''],chordPassVariants:[{pass:2,chords:['C/E','','G7','']}]});
+    fireEvent.click(screen.getByRole('button', { name: '拍內和弦與休止' }));
+    expect(screen.queryByText('指定遍數的替代和弦')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', {name:'新增拍內和弦 · 1&'}));
+    expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0]).toMatchObject({chords:['C','','C/E',''],chordSubdivisions:[{beat:0,offset:.5,chord:'C'}],chordPassVariants:[{pass:2,chords:['C/E','','C7','']}]});
   });
 
   it.each(['desktop', 'phone'] as const)('sets D.C. al Fine as one structured marker on %s', deviceLayout => {
@@ -314,7 +351,7 @@ describe('PreviewBarEditor', () => {
     const source:Song={...song,sections:[{...song.sections[0],bars:[{...song.sections[0].bars[0],chordSubdivisions:[{beat:0,offset:.5,chord:'G/B'}]}]}]};
     const session=createPreviewEditSession({song:source,target:{...target,slotIndex:0,rawChordIndex:0},inputMode:'letters'});
     const {onApplyDraft}=renderEditor({session,deviceLayout});
-    fireEvent.click(screen.getByRole('button', { name: '拍內和弦與指定遍數和弦' }));
+    fireEvent.click(screen.getByRole('button', { name: '拍內和弦與休止' }));
     fireEvent.change(screen.getByRole('textbox',{name:'追加和弦 1'}),{target:{value:'Am/C'}});
     const changed=onApplyDraft.mock.calls.at(-1)?.[0];expect(changed.sections[0].bars[0].chords).toEqual(['C']);expect(changed.sections[0].bars[0].chordSubdivisions).toEqual([{beat:0,offset:.5,chord:'Am/C'}]);
     fireEvent.change(screen.getByRole('combobox',{name:'追加和弦 1 拍位'}),{target:{value:'1.75'}});
@@ -1579,7 +1616,7 @@ describe('PreviewBarEditor', () => {
     expect(bar.chords[3]).toBe('G/B');
     expect(bar.chordSubdivisions?.map(entry => entry.offset)).toEqual(input.toLowerCase() === 'gambmcm' ? [.25, .5, .75] : [.5]);
     expect(bar.chordSubdivisions?.at(-1)?.chord).toBe(input.toLowerCase() === 'gambmcm' ? 'Cm' : input === 'gmaj7am' ? 'Am' : 'Dm');
-    expect(screen.getByRole('button', { name: '拍內和弦與指定遍數和弦' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: '拍內和弦與休止' })).toHaveAttribute('aria-pressed', 'false');
     fireEvent.change(capture, { target: { value: 'G' } });
     expect(onApplyDraft.mock.calls.at(-1)![0].sections[0].bars[0].chordSubdivisions).toEqual([]);
   });

@@ -154,9 +154,9 @@ it('edits bar and section tempo from the subdivision editor without changing the
   render(<PreviewBarEditor session={session} language="zh" deviceLayout="desktop" storedKey="D" displayedKey="D" storageMode="letters"
     onApplyDraft={apply} onInputModeChange={() => {}} onNotationModeChange={() => {}} onNotationCursorChange={() => {}}
     onJianpuInputAbsoluteChange={() => {}} onNavigate={() => {}} onStructure={() => {}} onUndo={() => {}} onRedo={() => {}} onDone={() => {}} onCancel={() => {}} />);
-  expect(screen.getByRole('button', { name: '拍內和弦與指定遍數和弦' })).toHaveAttribute('aria-pressed', 'false');
-  fireEvent.click(screen.getByRole('button', { name: '拍內和弦與指定遍數和弦' }));
-  expect(screen.getByRole('button', { name: '拍內和弦與指定遍數和弦' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: '拍內和弦與休止' })).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(screen.getByRole('button', { name: '拍內和弦與休止' }));
+  expect(screen.getByRole('button', { name: '拍內和弦與休止' })).toHaveAttribute('aria-pressed', 'true');
   fireEvent.click(screen.getByText('速度變化'));
   fireEvent.click(screen.getByRole('button', { name: '設定小節速度' }));
   fireEvent.change(screen.getByLabelText('小節速度'), { target: { value: 'reset' } });

@@ -125,11 +125,12 @@ describe('SongEditor shared notation commands', () => {
     expect(onChange.mock.calls.at(-1)?.[0].sections[0].bars[0]).toMatchObject({chords:[''],unmeteredChordLines:[['G','Bm7'],['Em','D','Cm9']]});
   });
 
-  it('edits the second-pass harmony in the legacy marks panel without changing the first pass', () => {
+  it('adds an offbeat in the marks panel while preserving legacy numbered passes', () => {
     const onChange=renderEditor(makeSong({chords:['C','','C/E',''],chordPassVariants:[{pass:2,chords:['C/E','','C7','']}]}));
     fireEvent.click(screen.getAllByRole('button',{name:'標註'})[0]);
-    fireEvent.change(screen.getByRole('textbox',{name:'第2遍 第3拍和弦'}),{target:{value:'G7'}});
-    expect(onChange.mock.calls.at(-1)?.[0].sections[0].bars[0]).toMatchObject({chords:['C','','C/E',''],chordPassVariants:[{pass:2,chords:['C/E','','G7','']}]});
+    expect(screen.queryByText('指定遍數的替代和弦')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', {name:'新增拍內和弦 · 1&'}));
+    expect(onChange.mock.calls.at(-1)?.[0].sections[0].bars[0]).toMatchObject({chords:['C','','C/E',''],chordSubdivisions:[{beat:0,offset:.5,chord:'C'}],chordPassVariants:[{pass:2,chords:['C/E','','C7','']}]});
   });
 
   it('marks a short bar as a partial measure without altering its written length', () => {

@@ -94,6 +94,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-26',
+        title: 'Offbeat chord entry',
+        bullets: ['The chord keyboard shows downbeats by default. Press & to add a second chord on the same beat, or tap &+ on touchscreens. Open the position menu for e and a.']
+      },
+      {
+        version: '0.12.63',
         date: '2026-11-22',
         title: 'One action for PDF export',
         bullets: ['On phones and tablets, exported charts and setlists have a single Open or download PDF action. Use the system file menu to share the attachment to LINE or another app.']
@@ -1360,6 +1366,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-26',
+        title: '拍內和弦輸入',
+        bullets: ['和弦輸入平常只顯示正拍。按 & 即可在同一拍加入第二個和弦，觸控可點 &+。需要 e 或 a 時，再展開拍位選單。']
+      },
+      {
+        version: '0.12.63',
         date: '2026-11-22',
         title: '簡化手機與平板的 PDF 匯出',
         bullets: ['手機和平板匯出歌譜或歌單後，只需點「開啟或下載 PDF」，即可用系統的檔案選單分享給 LINE 或其他 App。']

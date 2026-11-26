@@ -1,9 +1,8 @@
 import React from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, render } from '@testing-library/react';
 import type { Bar, Song } from '../types';
 import ChordSheet from '../components/ChordSheet';
-import ChordPassVariantsEditor from '../components/ChordPassVariantsEditor';
 import { normalizeStoredSong } from './workspace';
 import { getChordPassEvents, selectChordPass, normalizeChordPassVariants } from '../utils/chordPassVariants';
 import { applyBarKeyChange, mergeSectionToPrevious, insertChordBeatBeforeSlot, isBarCompletelyEmpty, setChordAtBeatSlot, updateEditableBarFields } from './songEditing';
@@ -65,11 +64,6 @@ it.each([1,2,3] as const)('renders alternative chords, onset positions and trans
   const variant=container.querySelector('[data-chord-pass="2"]')!;expect(variant.textContent).toContain('第2遍');expect([...variant.querySelectorAll('[data-chord-pass-event-position]')].map(e=>[(e as HTMLElement).dataset.chordPassEventPosition,e.textContent])).toEqual([['1',numbers?'1/3':'D/F#'],['3',numbers?'17':'D7']]);expect(container.querySelector('[data-preview-bottom-lane]')).not.toBeNull();cleanup();
  }
 });
-it('edits and removes a numbered pass without mutating the original chord array', () => {
- const b=sourceBar(),onChange=vi.fn(); render(<ChordPassVariantsEditor bar={b} beats={4} language="zh" onChange={onChange}/>);
- fireEvent.change(screen.getByRole('textbox',{name:'第2遍 第3拍和弦'}),{target:{value:'G7'}});expect(onChange.mock.calls.at(-1)![0][0].chords).toEqual(['C/E','','G7','']);expect(b.chords).toEqual(['C','','C/E','']);fireEvent.click(screen.getByRole('button',{name:'移除第2遍替代和弦'}));expect(onChange.mock.calls.at(-1)![0]).toBeUndefined();
-});
-
 it('uses the same capo conversion for the alternative and original chord lanes', () => {
  const s=song();s.capo=2;const {container}=render(<ChordSheet song={s} currentKey="D" language="zh"/>);expect([...container.querySelectorAll('[data-chord-pass="2"] [data-chord-pass-event-position]')].map(e=>e.textContent)).toEqual(['C/E','C7']);
 });
