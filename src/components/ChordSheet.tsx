@@ -3879,22 +3879,17 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                                           : { kind: 'move', source, to, toOffset, beats: beatsPerBar })}>{content}</ChordBeatDragLane>;
                                     };
                                     if (review && controls && target) {
-                                      const scope = language === 'zh' ? `確認 ${review.count} 個同型小節` : `Confirm ${review.count} ${review.count === 1 ? 'bar' : 'bars'}`;
-                                      const description = language === 'zh' ? `確認本曲 ${review.count} 個同型待核小節，拖曳和弦可調整拍位` : `Confirm timing for ${review.count} matching bars. Drag a chord to adjust its beat.`;
                                       return <>
                                         <div data-timing-review data-preview-edit-ui className="flex w-full min-w-0 flex-col print:hidden">
-                                          <button className="timing-review-action" type="button" data-preview-only-control title={description}
-                                            onClick={event => {
-                                              event.stopPropagation();
-                                              if (review.manual) {
+                                          {review.manual && (
+                                            <button className="timing-review-action" type="button" data-preview-only-control
+                                              onClick={event => {
+                                                event.stopPropagation();
                                                 emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords', 0);
-                                                return;
-                                              }
-                                              const cell = event.currentTarget.closest('.sheet-bar');
-                                              const keyboard = event.detail === 0;
-                                              controls.onEdit(target, { kind: 'review', review, positions: review.positions });
-                                              if (keyboard) requestAnimationFrame(() => cell?.querySelector<HTMLElement>('[data-move-chord]')?.focus({ preventScroll: true }));
-                                            }}>{review.manual ? (language === 'zh' ? '待人工 · 核對拍位…' : 'Review timing…') : (language === 'zh' ? `建議拍位 · ${scope}` : `Suggested · ${scope}`)}</button>
+                                              }}>
+                                              {language === 'zh' ? '待人工 · 核對拍位…' : 'Review timing…'}
+                                            </button>
+                                          )}
                                           {renderEditableChords()}
                                           {sourceNote}
                                         </div>

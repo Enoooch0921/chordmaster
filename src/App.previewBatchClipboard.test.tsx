@@ -431,7 +431,13 @@ it.each(['songs', 'setlists'])('moves a suggested chord in all matching pending 
   bars[0] = { id: 'bar-0', chords: ['D/F#', '/', 'G', '/'] };
   for (const i of [1, 2]) bars[i] = { id: `bar-${i}`, chords: ['D/F#', 'G'], chordTimingUnspecified: true };
   bars[3] = { id: 'bar-3', chords: ['G', 'D/F#'], chordTimingUnspecified: true };
+  bars[4] = { id: 'bar-4', chords: ['C', 'Am', 'G'], chordTimingUnspecified: true };
   await start(mode);
+  for (const i of [1, 2, 3]) {
+    expect(bar(i)).not.toHaveTextContent('建議拍位');
+    expect(bar(i).querySelector('.timing-review-action')).toBeNull();
+  }
+  expect(within(bar(4)).getByRole('button', { name: /核對拍位/ })).toBeInTheDocument();
   const chord = bar(1).querySelector<HTMLElement>('[data-move-chord="G"][data-move-beat="2"]')!;
   fireEvent.keyDown(chord, { key: 'ArrowRight' });
   await waitFor(() => expect(bar(2).querySelector('[data-move-chord="G"][data-move-beat="3"]')).toBeInTheDocument());
@@ -481,4 +487,31 @@ it.each(['songs', 'setlists'])('resolves the title and a single review note inde
   await waitFor(() => expect(screen.queryByRole('checkbox', { name: /完成人工覆核/ })).toBeNull());
   expect(screen.getByRole('heading', { level: 1, name: /手勢測試（手寫版）$/ })).toBeInTheDocument();
   expect(bar(0)).toHaveTextContent('待檢查：何時進副歌？');
+}, 15000);
+
+it.each(['songs', 'setlists'])('removes only the right-clicked question and restores it with undo in %s', async mode => {
+  const first = '待確認：速度有變嗎？';
+  const second = '待檢查：何時進副歌？';
+  fixture.songs[0].sections[0].bars[0].annotation = `樂隊進。
+${first}
+${second}`;
+  await start(mode);
+  const note = within(bar(0)).getByRole('button', { name: second });
+  fireEvent.keyDown(note, { key: 'F10', shiftKey: true });
+  const item = screen.getByRole('menuitem', { name: '刪除標註' });
+  expect(item).toHaveFocus();
+  fireEvent.keyDown(item, { key: 'Escape' });
+  expect(note).toHaveFocus();
+  expect(screen.queryByRole('menu')).toBeNull();
+  fireEvent.contextMenu(note, { clientX: 100, clientY: 160 });
+  expect(screen.getAllByRole('menuitem')).toHaveLength(1);
+  fireEvent.pointerDown(document.body);
+  expect(screen.queryByRole('menu')).toBeNull();
+  fireEvent.contextMenu(note, { clientX: 100, clientY: 160 });
+  fireEvent.click(screen.getByRole('menuitem', { name: '刪除標註' }));
+  await waitFor(() => expect(within(bar(0)).queryByRole('button', { name: second })).toBeNull());
+  expect(bar(0)).toHaveTextContent('樂隊進。');
+  expect(within(bar(0)).getByRole('button', { name: first })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '撤銷' }));
+  expect(await within(bar(0)).findByRole('button', { name: second })).toBeInTheDocument();
 }, 15000);

@@ -9838,7 +9838,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       const remove = !event.metaKey && !event.ctrlKey && (event.key === 'Delete' || event.key === 'Backspace');
       if ((!duplicate && !remove) || event.defaultPrevented || event.isComposing || event.keyCode === 229
         || event.repeat || event.altKey || event.shiftKey || isEditableKeyboardTarget(event.target)
-        || (event.target instanceof Element && event.target.closest('[role="dialog"], [aria-modal="true"], [contenteditable]'))
+        || (event.target instanceof Element && event.target.closest('[role="dialog"], [role="menu"], [data-review-note-handle], [aria-modal="true"], [contenteditable]'))
         || window.getSelection()?.toString()) return;
       const sourceSong = getPreviewBatchSong();
       if (!sourceSong || !activePreviewIdentity) return;
