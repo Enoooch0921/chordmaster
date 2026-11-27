@@ -94,6 +94,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-28',
+        title: 'Beat placement and review note actions',
+        bullets: [
+          'Bars with inferred beat positions show their chords directly. A prompt appears only when the timing needs review.',
+          'Right-click a review note or press and hold it on a touchscreen to choose Delete note. Undo restores the note.'
+        ]
+      },
+      {
+        version: '0.12.69',
         date: '2026-11-27',
         title: 'Score entry and manual review',
         bullets: [
@@ -1404,6 +1413,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-28',
+        title: '拍位顯示與標註刪除',
+        bullets: [
+          '可判斷拍位的小節直接顯示和弦，只有仍需人工核對的拍位會顯示提示。',
+          '在待確認標註上按右鍵，或在觸控螢幕上長按，即可選擇「刪除標註」。刪除後可按「撤銷」復原。'
+        ]
+      },
+      {
+        version: '0.12.69',
         date: '2026-11-27',
         title: '歌譜輸入與人工覆核',
         bullets: [
