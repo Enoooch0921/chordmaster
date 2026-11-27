@@ -54,6 +54,76 @@ it.each(['songs', 'setlists'])('extends, shrinks and adds ranges in %s', async m
   expect(selection()).toEqual(['bar-0', 'bar-1', 'bar-2', 'bar-6', 'bar-7']);
 }, 15000);
 
+it.each(['songs', 'setlists'])('duplicates discontinuous bars in score order with one undo in %s', async mode => {
+  await start(mode);
+  const orderedBars = () => Array.from(document.querySelectorAll<HTMLElement>('[data-preview-hoverable][data-preview-clipboard-bar]'));
+  const ids = () => orderedBars().map(node => node.dataset.previewClipboardBar);
+  const originals = ids();
+  fireEvent.click(bar(3), { metaKey: true });
+  fireEvent.click(bar(0), { metaKey: true });
+  const modifier = mode === 'songs' ? { metaKey: true } : { ctrlKey: true };
+  const input = document.createElement('input');
+  document.body.appendChild(input);
+  expect(fireEvent.keyDown(input, { key: 'd', ...modifier })).toBe(true);
+  input.remove();
+  expect(ids()).toEqual(originals);
+  fireEvent.keyDown(document.body, { key: 'd', ...modifier });
+  const copies = selection();
+  expect(copies).toHaveLength(2);
+  expect(new Set([...originals, ...copies]).size).toBe(originals.length + 2);
+  expect(ids()).toEqual([...originals.slice(0, 4), ...copies, ...originals.slice(4)]);
+  for (const [index, sourceIndex] of [0, 3].entries()) {
+    const copy = orderedBars()[4 + index];
+    const source = bar(sourceIndex);
+    expect(copy.querySelector('[data-chord-root]')?.textContent).toBe(source.querySelector('[data-chord-root]')?.textContent);
+    expect(copy.querySelector('[data-jianpu-onset="0"]')?.textContent).toBe(source.querySelector('[data-jianpu-onset="0"]')?.textContent);
+    expect(within(copy).getAllByRole('button', { name: /Select rhythm note/ })).toHaveLength(
+      within(source).getAllByRole('button', { name: /Select rhythm note/ }).length
+    );
+  }
+  fireEvent.click(document.querySelector<HTMLButtonElement>('[data-preview-undo]')!);
+  await waitFor(() => expect(ids()).toEqual(originals));
+}, 15000);
+
+it('nudges a last offbeat into the next bar and back using that bar’s meter', async () => {
+  fixture.songs[0].sections[0].bars[0] = { id: 'bar-0', timeSignature: '3/4', chords: ['C', '', 'G'], chordMarks: { 2: { beatOffset: 0.5 } } };
+  fixture.songs[0].sections[0].bars[1] = { id: 'bar-1', timeSignature: '4/4', chords: ['', 'A'] };
+  await start();
+  const original = () => bar(0).querySelector('[data-move-chord="G"][data-move-beat="2"][data-move-offset="0.5"]');
+  const moved = () => bar(1).querySelector('[data-move-chord="G"][data-move-beat="0"][data-move-offset="0"]');
+  const capture = () => screen.getByRole('textbox', { name: '和弦直接輸入' });
+  fireEvent.click(original()!);
+  fireEvent.keyDown(capture(), { key: 'ArrowRight', altKey: true });
+  expect(moved()).toBeInTheDocument();
+  expect(original()).toBeNull();
+  expect(capture()).toHaveValue('G');
+  fireEvent.keyDown(capture(), { key: 'ArrowLeft', altKey: true });
+  expect(original()).toBeInTheDocument();
+  expect(moved()).toBeNull();
+  expect(screen.getByRole('button', { name: '第 3 拍反拍', pressed: true })).toBeInTheDocument();
+}, 15000);
+
+it('leaves both chords in place when nudging onto an occupied downbeat', async () => {
+  fixture.songs[0].sections[0].bars[0] = { id: 'bar-0', chords: ['', '', '', 'G'], chordMarks: { 3: { beatOffset: 0.5 } } };
+  await start();
+  const original = bar(0).querySelector('[data-move-chord="G"][data-move-offset="0.5"]')!;
+  fireEvent.click(original);
+  fireEvent.keyDown(screen.getByRole('textbox', { name: '和弦直接輸入' }), { key: 'ArrowRight', altKey: true });
+  expect(original).toBeInTheDocument();
+  expect(bar(1).querySelector('[data-move-chord="Dm"]')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '第 4 拍反拍', pressed: true })).toBeInTheDocument();
+});
+
+it('starts an empty rhythm lane at the chosen written beat in 6/8', async () => {
+  fixture.songs[0].sections[0].bars[0] = { id: 'bar-0', timeSignature: '6/8', chords: ['C', '', '', '', 'G', ''] };
+  await start();
+  fireEvent.click(bar(0).querySelector('[data-move-chord="G"]')!);
+  fireEvent.keyDown(screen.getByRole('textbox', { name: '和弦直接輸入' }), { key: 'r', code: 'KeyR', altKey: true });
+  fireEvent.keyDown(document.body, { key: '8' });
+  expect(bar(0).querySelector('[data-rhythm-cursor-unit="10"]')).toBeInTheDocument();
+  expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1.67');
+});
+
 it.each(['小節', '和弦', '節奏', '簡譜'])('copies complete bars once and chooses %s when pasting', async label => {
   fixture.songs[0].sections[0].bars[4] = { id: 'bar-4', chords: ['B7'], rhythm: 'w', riff: '7 7 7 7' };
   await start();

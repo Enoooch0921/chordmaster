@@ -30,11 +30,13 @@ export function useAuditionPreferences(userId: string | null | undefined, defaul
   const prefix = 'chordmaster.audition.v1.' + (userId ? 'user.' + encodeURIComponent(userId) : 'guest');
   const [range, setScope] = usePreference(prefix + '.scope');
   const [click, setClick] = usePreference(prefix + '.metronome');
+  const [entry, setEntry] = usePreference(prefix + '.jianpu-entry');
   const [lead, setLead] = usePreference(prefix + '.melody');
   const [delay, saveDelay] = usePreference('chordmaster.audition.visual-delay-ms.v1');
   const limitDelay = (value: number) => Number.isFinite(value) ? Math.max(-500, Math.min(1000, value)) : 0;
   const scope = range === 'chord' || range === 'bar' || range === 'section' || range === 'song' || range === 'map' ? range : range === 'practice' ? 'map' : defaultScope;
   return {
+    jianpuEntry: entry === 'true', setJianpuEntry: (on: boolean) => setEntry(String(on)),
     scope, setScope, visualDelayMs: limitDelay(Number(delay)),
     setVisualDelayMs: (ms: number) => saveDelay(String(limitDelay(ms))),
     metronome: click !== 'false', melody: lead !== 'false',

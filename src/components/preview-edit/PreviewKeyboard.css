@@ -79,6 +79,7 @@
   border-color: var(--keyboard-border) !important;
   color: var(--keyboard-text) !important;
 }
+[data-keyboard-refined] .keyboard-quick-chips button[aria-pressed="true"],
 [data-keyboard-refined] button.keyboard-key-active,
 [data-keyboard-refined] [data-keyboard-surface] button[aria-pressed="true"] {
   background: var(--keyboard-active) !important;
@@ -492,3 +493,93 @@
 }
 .beat-snap-locked { color: var(--keyboard-muted); }
 @media (pointer: coarse) { .chord-beat-pair { --beat-key-width: 44px; } }
+
+/* Quick suggestion chips (in-key chords & text cues) */
+.keyboard-quick-chips {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding-block: 1px;
+}
+.keyboard-quick-chips::-webkit-scrollbar { display: none; }
+.keyboard-quick-chips > button {
+  flex: none;
+  min-height: 28px;
+  padding: 2px 9px;
+  border-radius: 999px !important;
+  border: 1px solid var(--keyboard-border);
+  background: var(--keyboard-key);
+  color: var(--keyboard-text);
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+}
+@media (pointer: coarse) {
+  .keyboard-quick-chips > button { min-height: 34px; padding-inline: 11px; font-size: 12px !important; }
+}
+
+/* Rhythm bar-fill progress meter & Chinese-friendly quick duration controls */
+.rhythm-quick-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+}
+.rhythm-fill-meter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.rhythm-fill-track {
+  position: relative;
+  flex: 1;
+  min-width: 48px;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--keyboard-utility);
+  border: 1px solid var(--keyboard-border);
+}
+.rhythm-fill-value {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--keyboard-active);
+  transform-origin: left;
+}
+.rhythm-fill-value[data-full="true"] { background: #15803d; }
+.rhythm-fill-label {
+  flex: none;
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--keyboard-muted);
+}
+.rhythm-quick-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+.rhythm-quick-actions > button {
+  min-width: 32px;
+  min-height: 30px;
+  padding: 0 7px;
+  border-radius: 7px !important;
+  border: 1px solid var(--keyboard-border);
+  background: var(--keyboard-key);
+  color: var(--keyboard-text);
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  cursor: pointer;
+}

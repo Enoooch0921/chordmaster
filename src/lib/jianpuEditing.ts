@@ -66,6 +66,7 @@ export type JianpuAction =
   | { type: 'insert-hold' }
   | { type: 'set-duration'; duration: JianpuDuration }
   | { type: 'set-octave'; octave: JianpuOctave }
+  | { type: 'step-octave'; delta: -1 | 1; targetPrevious?: boolean }
   | { type: 'set-accidental'; accidental: JianpuAccidental }
   | { type: 'toggle-dot' }
   | { type: 'toggle-triplet' }
@@ -75,6 +76,7 @@ export type JianpuAction =
   | { type: 'clear-formatting' };
 
 export interface JianpuCommandResult {
+  enteredPitch?: { pitch: string; accidental: JianpuAccidental; octave: number };
   song: Song;
   target: SongBarIdentity;
   cursor: JianpuCursor;
@@ -969,7 +971,8 @@ const moveCursor = (
   song: Song,
   target: SongBarIdentity,
   cursor: JianpuCursor,
-  direction: -1 | 1
+  direction: -1 | 1,
+  crossBar = true
 ): { target: SongBarIdentity; cursor: JianpuCursor } => {
   const context = buildContext(song, target);
   if (!context) return { target, cursor };
@@ -988,6 +991,7 @@ const moveCursor = (
         (item.beatIndex === safeCursor.beatIndex && item.unitIndex <= safeCursor.unitIndex)
       ));
   if (candidate) return { target, cursor: candidate };
+  if (!crossBar) return { target, cursor: safeCursor };
 
   const section = song.sections[context.sectionIndex];
   for (
@@ -1040,13 +1044,8 @@ const insertPitch = (
       dotted: selected.note.dotted
     });
     const resized = resizeSelectedNote(song, target, context, selected, replacement);
-    return baseResult(
-      resized.song,
-      target,
-      safeCursor,
-      selectedMode,
-      resized.error
-    );
+    const result = baseResult(resized.song, target, safeCursor, selectedMode, resized.error);
+    return resized.error ? result : { ...result, enteredPitch: resolved };
   }
 
   const availableUnits = getAvailableUnitsAtCursor(context, safeCursor);
@@ -1102,8 +1101,8 @@ const insertPitch = (
     item.kind === 'note' && Math.abs(item.unitStart - safeCursor.unitIndex) < EPSILON
   ));
   const insertedCursor = insertedNote ? cursorForNote(insertedNote) : safeCursor;
-  const advanced = moveCursor(nextSong, target, insertedCursor, 1);
-  return baseResult(nextSong, advanced.target, advanced.cursor, fittedMode);
+  const advanced = moveCursor(nextSong, target, insertedCursor, 1, false);
+  return { ...baseResult(nextSong, advanced.target, advanced.cursor, fittedMode), enteredPitch: resolved };
 };
 
 const updateSelectedPitchProperty = (
@@ -1258,7 +1257,7 @@ const insertHold = (
   tokens[safeCursor.beatIndex] = '-';
   const nextSong = applyTokens(song, target, context, tokens);
   const inserted = getJianpuCursorForNote(nextSong, target, safeCursor.beatIndex, 0) ?? safeCursor;
-  const advanced = moveCursor(nextSong, target, inserted, 1);
+  const advanced = moveCursor(nextSong, target, inserted, 1, false);
   return baseResult(nextSong, advanced.target, advanced.cursor, inputMode);
 };
 
@@ -1458,6 +1457,38 @@ const setGraces = (song: Song, target: SongBarIdentity, cursor: JianpuCursor, in
   return baseResult(resized.song, target, safeCursor, inputMode, resized.error);
 };
 
+const stepOctave = (
+  song: Song,
+  target: SongBarIdentity,
+  cursor: JianpuCursor,
+  inputMode: JianpuInputMode,
+  delta: -1 | 1,
+  targetPrevious: boolean,
+  pitchContext?: JianpuPitchContext
+): JianpuCommandResult => {
+  const context = buildContext(song, target);
+  if (!context) return baseResult(song, target, cursor, inputMode, '找不到要編輯的小節。');
+  const safeCursor = clampCursor(context, cursor);
+  const selected = selectedNoteAtCursor(context, safeCursor);
+  const targetNote = selected ?? (targetPrevious ? noteEndingAtCursor(context, safeCursor) : null);
+  const clamp = (value: number) => Math.max(-MAX_RELATIVE_OCTAVE_SHIFT, Math.min(MAX_RELATIVE_OCTAVE_SHIFT, value)) as JianpuOctave;
+  if (!targetNote || targetNote.note.pitch === '0' || targetNote.note.pitch === '-') {
+    const nextOctave = clamp((inputMode.octave ?? 0) + delta);
+    return baseResult(song, target, safeCursor, normalizeInputMode({ ...inputMode, octave: nextOctave }));
+  }
+  const display = displayNoteForInputMode(song, target, targetNote.note, pitchContext);
+  const nextOctave = clamp(display.octave + delta);
+  const resolved = resolveInputParts(song, target, display.pitch, normalizeAccidental(display.accidental), nextOctave, pitchContext);
+  const replacement = rebuildJianpuNote(targetNote.note, {
+    pitch: resolved.pitch,
+    accidental: resolved.accidental,
+    octave: resolved.octave
+  });
+  const resized = resizeSelectedNote(song, target, context, targetNote, replacement);
+  const nextInput = normalizeInputMode({ ...inputMode, octave: nextOctave });
+  return baseResult(resized.song, target, safeCursor, resized.error ? inputMode : nextInput, resized.error);
+};
+
 export const applyJianpuCommand = (
   song: Song,
   target: SongBarIdentity,
@@ -1485,6 +1516,8 @@ export const applyJianpuCommand = (
       return setDuration(song, target, safeCursor, safeInputMode, action.duration);
     case 'set-octave':
       return updateSelectedPitchProperty(song, target, safeCursor, safeInputMode, 'octave', action.octave, pitchContext);
+    case 'step-octave':
+      return stepOctave(song, target, safeCursor, safeInputMode, action.delta, Boolean(action.targetPrevious), pitchContext);
     case 'set-accidental':
       return updateSelectedPitchProperty(song, target, safeCursor, safeInputMode, 'accidental', action.accidental, pitchContext);
 	    case 'toggle-dot':

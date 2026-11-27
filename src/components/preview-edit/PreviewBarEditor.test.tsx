@@ -1,3 +1,4 @@
+import { AuditionPiano } from '../../lib/auditionPiano';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
@@ -2193,5 +2194,138 @@ describe('offbeat relocation, bidirectional beat strip, and Alt+Arrow nudging', 
     const promoted = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
     expect(promoted.sections[0].bars[0].chords).toEqual(['C', '', 'G', '']);
     expect(promoted.sections[0].bars[0].chordSubdivisions).toBeUndefined();
+  });
+});
+
+describe('input fluency upgrades across rhythm, chords, jianpu, and text', () => {
+  it('supports Chinese number rhythm entry (1/2/4/8/6), 0 rest toggle, arrows/+/- duration stepping, 3 triplet, x cross-head, and % repeat', () => {
+    const rhythmSong: Song = {
+      ...song,
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [
+          { id: 'bar-0', chords: ['C'], rhythm: 'e q e q q' },
+          { id: 'bar-1', chords: ['G'] }
+        ]
+      }]
+    };
+    const rhythmTarget = {
+      ...target,
+      field: 'rhythm' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'rhythm' as const, cursorUnit: 0 }
+    };
+    let current = createPreviewEditSession({ song: rhythmSong, target: rhythmTarget, inputMode: 'letters' });
+    const { onApplyDraft, onNotationCursorChange, rerenderSession } = renderEditor({ session: current });
+
+    const step = (init: KeyboardEventInit) => {
+      fireEvent.keyDown(document.body, init);
+      const nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song | undefined;
+      if (nextSong && nextSong !== current.draftSong) {
+        const cursor = onNotationCursorChange.mock.lastCall?.[0];
+        expect(cursor?.kind).toBe('rhythm');
+        current = applyPreviewDraft({ ...current, cursorByMode: { ...current.cursorByMode, rhythm: cursor } }, nextSong);
+        rerenderSession(current);
+      }
+    };
+
+    step({ key: '8' });
+    expect(current.draftSong.sections[0].bars[1].rhythm).toBe('e');
+    step({ key: '0' });
+    expect(current.draftSong.sections[0].bars[1].rhythm).toBe('er');
+    step({ key: 'ArrowUp' });
+    expect(current.draftSong.sections[0].bars[1].rhythm).toBe('qr');
+    step({ key: '0' });
+    expect(current.draftSong.sections[0].bars[1].rhythm).toBe('q');
+    step({ key: 'x' });
+    expect(current.draftSong.sections[0].bars[1].rhythm).toBe('qc');
+    step({ key: '%' });
+    expect(current.draftSong.sections[0].bars[1].rhythm).toBe('e q e q q');
+  });
+
+  it('returns to the same-beat downbeat when pressing Backspace on an empty offbeat, and switches modes with Alt+R/J/T', () => {
+    const offbeatTarget = {
+      ...target,
+      slotIndex: 2,
+      rawChordIndex: null,
+      cursor: { kind: 'chord' as const, slotIndex: 2, rawChordIndex: null, editOffset: 0.5 as const, auditionOffset: 0.5 }
+    };
+    const { onNotationCursorChange, onNavigate, onNotationModeChange } = renderEditor({
+      session: createPreviewEditSession({ song, target: offbeatTarget, inputMode: 'letters' })
+    });
+    const capture = screen.getByRole('textbox', { name: '和弦直接輸入' });
+
+    fireEvent.keyDown(capture, { key: 'Backspace' });
+    expect(onNotationCursorChange).toHaveBeenLastCalledWith(expect.objectContaining({ slotIndex: 2, editOffset: 0, auditionOffset: 0 }));
+    expect(onNavigate).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(capture, { key: 'r', code: 'KeyR', altKey: true });
+    expect(onNotationModeChange).toHaveBeenCalledWith('rhythm');
+    fireEvent.keyDown(capture, { key: 'j', code: 'KeyJ', altKey: true });
+    expect(onNotationModeChange).toHaveBeenCalledWith('jianpu');
+  });
+
+  it('auditions successful jianpu entries only when enabled and stays on the last beat until navigation', () => {
+    const play = vi.spyOn(AuditionPiano.prototype, 'play').mockResolvedValue({ metronomeUnavailable: false });
+    const draft: Song = { ...song, currentKey: 'D', sections: [{ id: 'section-1', title: 'Verse', bars: [
+      { id: 'bar-1', chords: [], riff: '1 | 2 | 3' }, { id: 'bar-2', chords: [] }
+    ] }] };
+    const jianpuTarget = { ...target, field: 'jianpu' as const,
+      cursor: { kind: 'jianpu' as const, beatIndex: 3, unitIndex: 0, noteIndex: null } };
+    try {
+      const { onNavigate, onNotationCursorChange } = renderEditor({
+        session: createPreviewEditSession({ song: draft, target: jianpuTarget, inputMode: 'letters' })
+      });
+      const toggle = screen.getByRole('button', { name: '輸入簡譜時試聽' });
+      expect(toggle).toHaveAttribute('aria-pressed', 'false');
+      fireEvent.keyDown(document.body, { key: '5', isComposing: true });
+      expect(onNotationCursorChange).not.toHaveBeenCalled();
+      fireEvent.keyDown(document.body, { key: '5' });
+      expect(play).not.toHaveBeenCalled();
+      fireEvent.click(toggle);
+      fireEvent.keyDown(document.body, { key: '5' });
+      expect(play.mock.lastCall?.[0].sounds[0].notes).toEqual([69]);
+      expect(onNavigate).not.toHaveBeenCalled();
+      expect(onNotationCursorChange.mock.lastCall?.[0]).toMatchObject({ kind: 'jianpu', beatIndex: 3, noteIndex: 0 });
+      fireEvent.keyDown(document.body, { key: 'Enter' });
+      expect(onNavigate).toHaveBeenCalledWith('next', undefined, { bar: true });
+      fireEvent.click(toggle);
+    } finally {
+      play.mockRestore();
+    }
+  });
+
+  it('offers quick chord suggestions, text cue chips, and Shift+ArrowUp jianpu octave stepping on the previous note', async () => {
+    const user = userEvent.setup();
+    const { onApplyDraft } = renderEditor({ deviceLayout: 'phone' });
+
+    await user.click(screen.getByRole('button', { name: 'C/E' }));
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].chords).toEqual(['C', 'C/E', '', '']);
+
+    await user.click(screen.getByRole('button', { name: '文字欄位' }));
+    await user.click(screen.getByRole('button', { name: 'Kick in' }));
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].annotation).toBe('Kick in');
+    await user.click(screen.getByRole('button', { name: 'Pno' }));
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].label).toBe('Pno');
+
+    // Jianpu Shift+ArrowUp steps the just-entered previous note octave up without backtracking
+    const jianpuSong: Song = {
+      ...song,
+      sections: [{ id: 'section-1', title: 'Verse', bars: [{ id: 'bar-1', chords: ['C'], riff: "5'" }] }]
+    };
+    const jianpuTarget = {
+      ...target,
+      field: 'jianpu' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'jianpu' as const, beatIndex: 1, unitIndex: 0, noteIndex: null }
+    };
+    const { onApplyDraft: onJianpuDraft } = renderEditor({
+      session: createPreviewEditSession({ song: jianpuSong, target: jianpuTarget, inputMode: 'letters' })
+    });
+    fireEvent.keyDown(document.body, { key: 'ArrowUp', shiftKey: true });
+    expect((onJianpuDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].riff).toBe("5''");
   });
 });

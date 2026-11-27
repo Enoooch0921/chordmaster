@@ -276,3 +276,57 @@ describe('explicit rest tuplet corrections', () => {
     expect(changed.error).toContain('沒有足夠');
   });
 });
+
+describe('Chinese-friendly rhythm duration stepping, rest/triplet toggles, patterns, and repeat previous bar', () => {
+  it('steps duration shorter/longer and toggles rest/triplet on the preceding event', () => {
+    const start = edit(makeSong(), 0, { type: 'insert', token: 'e' });
+    expect(rhythmOf(start.song)).toBe('e');
+
+    const toRest = edit(start.song, start.cursor.cursorUnit, { type: 'toggle-rest' });
+    expect(rhythmOf(toRest.song)).toBe('er');
+
+    const longer = edit(toRest.song, toRest.cursor.cursorUnit, { type: 'step-duration', direction: 1 });
+    expect(rhythmOf(longer.song)).toBe('qr');
+
+    const backToNote = edit(longer.song, longer.cursor.cursorUnit, { type: 'toggle-rest' });
+    expect(rhythmOf(backToNote.song)).toBe('q');
+
+    const shorter = edit(backToNote.song, backToNote.cursor.cursorUnit, { type: 'step-duration', direction: -1 });
+    expect(rhythmOf(shorter.song)).toBe('e');
+
+    const triplet = edit(shorter.song, shorter.cursor.cursorUnit, { type: 'toggle-triplet' });
+    expect(rhythmOf(triplet.song)).toBe('e3');
+
+    // Empty bar toggle-rest inserts qr, toggle-triplet inserts q3
+    expect(rhythmOf(edit(makeSong(), 0, { type: 'toggle-rest' }).song)).toBe('qr');
+    expect(rhythmOf(edit(makeSong(), 0, { type: 'toggle-triplet' }).song)).toBe('q3');
+  });
+
+  it('inserts rhythm pattern sequences atomically and copies previous bar rhythm', () => {
+    const seq = edit(makeSong(), 0, { type: 'insert-sequence', tokens: ['e', 'q', 'e'] });
+    expect(seq.error).toBeNull();
+    expect(rhythmOf(seq.song)).toBe('e q e');
+
+    // Sequence that overflows rolls back cleanly
+    const overflow = edit(seq.song, seq.cursor.cursorUnit, { type: 'insert-sequence', tokens: ['h', 'h'] });
+    expect(overflow.changed).toBe(false);
+    expect(overflow.song).toBe(seq.song);
+    expect(overflow.error).toContain('沒有足夠');
+
+    // Copy previous bar rhythm
+    const twoBarSong: Song = {
+      ...makeSong({ rhythm: 'e q e q q' }),
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [
+          { id: 'bar-1', chords: ['C'], rhythm: 'e q e q q' },
+          { id: 'bar-2', chords: ['G'] }
+        ]
+      }]
+    };
+    const copied = applyRhythmEdit(twoBarSong, { sectionId: 'section-1', barId: 'bar-2' }, { cursorUnit: 0 }, { type: 'copy-previous' });
+    expect(copied.error).toBeNull();
+    expect(copied.song.sections[0].bars[1].rhythm).toBe('e q e q q');
+  });
+});

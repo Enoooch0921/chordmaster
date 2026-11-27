@@ -268,6 +268,7 @@ import {
   getBarStoredKey,
   getBarDisplayKey,
   getBarsByIdentities,
+  getEffectiveTimeSignatureForBar,
   getBeatCount,
   getChordBeatSlots,
   getChordStorageModeForTarget,
@@ -8995,14 +8996,26 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     if (mode === 'rhythm' || mode === 'jianpu') rememberPreviewNonChordMode(mode);
     setPreviewEditSession((current) => {
       if (!current || current.target.kind !== 'bar') return current;
-      const withMode = setPreviewNotationMode(current, mode);
-      const cursor = withMode.cursorByMode[mode];
       const located = findSongBar(current.draftSong, current.target);
       const hasRequestedNotation = mode === 'rhythm'
         ? Boolean(located?.bar.rhythm?.trim())
         : mode === 'jianpu'
           ? Boolean(located?.bar.riff?.trim())
           : true;
+      let inheritedCursor: PreviewNotationCursor | undefined;
+      if (located && current.notationMode === 'chords' && !hasRequestedNotation && current.target.slotIndex > 0) {
+        const meter = getEffectiveTimeSignatureForBar(current.draftSong, located.bar);
+        const { beatUnits, barUnits } = parseTimeSignature(meter);
+        const slots = getBeatCount(current.draftSong, located.bar);
+        const cursorUnit = Math.min(current.target.slotIndex, slots - 1) * barUnits / slots;
+        if (mode === 'jianpu') {
+          inheritedCursor = { kind: 'jianpu', beatIndex: Math.floor(cursorUnit / beatUnits), unitIndex: cursorUnit % beatUnits, noteIndex: null };
+        } else if (mode === 'rhythm') {
+          inheritedCursor = { kind: 'rhythm', cursorUnit };
+        }
+      }
+      const withMode = setPreviewNotationMode(current, mode, inheritedCursor);
+      const cursor = withMode.cursorByMode[mode];
       const lowerAnchorKey = `${current.previewIdentity}|${current.target.sectionId}|${current.target.barId}|lower|all`;
       const anchorKey = mode === 'chords' && cursor.kind === 'chord'
         ? makePreviewTargetAnchorKey(current.previewIdentity, current.target.sectionId, current.target.barId, cursor.slotIndex)
@@ -9313,11 +9326,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         if (!previousSectionId) return current;
         const previousBeatCount = getBeatCount(current.draftSong, previousBar);
         const lastSlotIndex = previousBeatCount - 1;
-        const slotIndex = getChordDisplaySlotOwnership(previousBar.chords, previousBeatCount)[lastSlotIndex]?.ownerSlotIndex
-          ?? lastSlotIndex;
+        const requested = requestedCursor?.kind === 'chord' ? requestedCursor : undefined;
+        const slotIndex = requested?.slotIndex ?? getChordDisplaySlotOwnership(previousBar.chords, previousBeatCount)[lastSlotIndex]?.ownerSlotIndex ?? lastSlotIndex;
         const rawChordIndex = getChordBeatSlots(previousBar, previousBeatCount)[slotIndex]?.rawChordIndex ?? null;
         const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, previousSectionId, previousBar.id, slotIndex);
-        const cursor: PreviewNotationCursor = { kind: 'chord', slotIndex, rawChordIndex };
+        const cursor: PreviewNotationCursor = { ...requested, kind: 'chord', slotIndex, rawChordIndex };
         const targetIdentity = { sectionId: previousSectionId, barId: previousBar.id };
 
         const retargeted = retargetPreviewEditSession(current, {
@@ -9349,17 +9362,20 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         draftSong = insertBar(draftSong, current.target, 'after', nextBar);
       }
       if (!nextBar.id) return current;
-      const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, nextSectionId, nextBar.id, 0);
+      const requested = requestedCursor?.kind === 'chord' ? requestedCursor : undefined;
+      const slotIndex = requested?.slotIndex ?? 0;
+      const rawChordIndex = requested?.rawChordIndex ?? null;
+      const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, nextSectionId, nextBar.id, slotIndex);
       const withDraft = draftSong === current.draftSong ? current : applyPreviewDraft(current, draftSong);
-      const cursor: PreviewNotationCursor = { kind: 'chord', slotIndex: 0, rawChordIndex: null };
+      const cursor: PreviewNotationCursor = { ...requested, kind: 'chord', slotIndex, rawChordIndex };
       const targetIdentity = { sectionId: nextSectionId, barId: nextBar.id };
 
       const retargeted = retargetPreviewEditSession(withDraft, {
         ...current.target,
         sectionId: nextSectionId,
         barId: nextBar.id,
-        slotIndex: 0 as const,
-        rawChordIndex: null as null,
+        slotIndex,
+        rawChordIndex,
         cursor,
         anchorKey,
         anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
@@ -9817,26 +9833,39 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     if (!isSheetView || !canOpenEditor || isLyricsMode || isPerformanceMode
       || isKeyboardShortcutsOpen || isSwitchingLibrary || isLoadingCloudWorkspace
       || !activePreviewSelectedBars.length) return;
-    const removeSelectedBars = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing || event.repeat
-        || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey
-        || !['Backspace', 'Delete'].includes(event.key)
-        || isEditableKeyboardTarget(event.target)
+    const editSelectedBars = (event: KeyboardEvent) => {
+      const duplicate = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd';
+      const remove = !event.metaKey && !event.ctrlKey && (event.key === 'Delete' || event.key === 'Backspace');
+      if ((!duplicate && !remove) || event.defaultPrevented || event.isComposing || event.keyCode === 229
+        || event.repeat || event.altKey || event.shiftKey || isEditableKeyboardTarget(event.target)
         || (event.target instanceof Element && event.target.closest('[role="dialog"], [aria-modal="true"], [contenteditable]'))
         || window.getSelection()?.toString()) return;
       const sourceSong = getPreviewBatchSong();
-      if (!sourceSong) return;
-      const targets = getBarsByIdentities(sourceSong, activePreviewSelectedBars).map(({ target }) => target);
-      if (!targets.length) return;
+      if (!sourceSong || !activePreviewIdentity) return;
+      const located = getBarsByIdentities(sourceSong, activePreviewSelectedBars);
+      if (!located.length) return;
       event.preventDefault();
       event.stopPropagation();
-      deletePreviewBars(sourceSong, targets);
+      if (remove) {
+        deletePreviewBars(sourceSong, located.map(({ target }) => target));
+        return;
+      }
+      const anchor = located[located.length - 1].target;
+      const result = pasteBarsAtBar(sourceSong, anchor, located.map(({ bar }) => bar), 'after');
+      if (!result.pastedBarIds.length) return;
+      if (activePreviewEditSession) applyPreviewEditDraft(result.song);
+      else commitPreviewBarBatchSong(result.song, sourceSong);
+      setPreviewSelectedBars(result.pastedBarIds.map(barId => ({
+        previewIdentity: activePreviewIdentity, sectionId: anchor.sectionId, barId
+      })));
+      toast.success(language === 'zh' ? `已重複 ${located.length} 小節` : `Duplicated ${located.length} bar(s)`, { id: 'preview-clipboard' });
     };
-    window.addEventListener('keydown', removeSelectedBars, true);
-    return () => window.removeEventListener('keydown', removeSelectedBars, true);
-  }, [activePreviewSelectedBars, canOpenEditor, deletePreviewBars, getPreviewBatchSong,
+    window.addEventListener('keydown', editSelectedBars, true);
+    return () => window.removeEventListener('keydown', editSelectedBars, true);
+  }, [activePreviewEditSession, activePreviewIdentity, activePreviewSelectedBars, applyPreviewEditDraft,
+    canOpenEditor, commitPreviewBarBatchSong, deletePreviewBars, getPreviewBatchSong,
     isKeyboardShortcutsOpen, isLoadingCloudWorkspace, isLyricsMode, isPerformanceMode,
-    isSheetView, isSwitchingLibrary]);
+    isSheetView, isSwitchingLibrary, language]);
 
   React.useEffect(() => {
     const handlePreviewEndingShortcut = (event: KeyboardEvent) => {

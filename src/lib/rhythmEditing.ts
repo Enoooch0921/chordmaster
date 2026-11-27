@@ -9,6 +9,7 @@ import {
   normalizeRhythmInput,
   normalizeRhythmToken,
   parseRhythmNotation,
+  parseTimeSignature,
   rhythmEndsWithTieToNext,
   rhythmUnitsEqual,
   rhythmUnitsGreater,
@@ -55,6 +56,11 @@ export type RhythmDeleteMode = 'backspace' | 'delete';
 
 export type RhythmEditAction =
   | { type: 'insert'; token: string }
+  | { type: 'insert-sequence'; tokens: string[] }
+  | { type: 'copy-previous' }
+  | { type: 'step-duration'; direction: -1 | 1 }
+  | { type: 'toggle-rest' }
+  | { type: 'toggle-triplet' }
   | { type: 'toggle-dot' }
   | { type: 'toggle-accent' }
   | { type: 'toggle-tie' }
@@ -429,6 +435,11 @@ export const applyRhythmEdit = (
 
   const currentNotation = context.located.bar.rhythm ?? '';
   const currentCursorUnits = getCursorUnitsForNotation(currentNotation, context.timeSignature);
+  // An empty lane can be opened at the selected chord beat before its first note exists.
+  if (!currentNotation.trim() && cursor.cursorUnit > 0 && cursor.cursorUnit < context.barUnits) {
+    const { beatValue } = parseTimeSignature(context.timeSignature);
+    if (Number.isInteger(cursor.cursorUnit / (16 / beatValue))) currentCursorUnits.push(cursor.cursorUnit);
+  }
   const safeCursor = sanitizeCursor(cursor, currentCursorUnits);
 
   if (action.type === 'home') return result(song, { cursorUnit: currentCursorUnits[0] ?? 0 }, null);
@@ -437,6 +448,32 @@ export const applyRhythmEdit = (
     const currentIndex = currentCursorUnits.findIndex((unit) => rhythmUnitsEqual(unit, safeCursor.cursorUnit));
     const nextIndex = Math.max(0, Math.min(currentCursorUnits.length - 1, currentIndex + action.direction));
     return result(song, { cursorUnit: currentCursorUnits[nextIndex] ?? safeCursor.cursorUnit }, null);
+  }
+
+  if (action.type === 'copy-previous') {
+    const previousBar = getAdjacentBar(song, context.located, -1);
+    const previousNotation = previousBar?.rhythm?.trim();
+    if (!previousNotation) return result(song, safeCursor, '前一小節沒有節奏可沿用。');
+    const parsedPrev = parseRhythmNotation(previousNotation, context.timeSignature);
+    if (parsedPrev.invalidTokens.length > 0 || rhythmUnitsGreater(parsedPrev.totalUnits, context.barUnits)) {
+      return result(song, safeCursor, '前一小節節奏超出目前小節拍數。');
+    }
+    const nextSong = writeNotation(song, target, previousNotation);
+    const nextUnits = getCursorUnitsForNotation(previousNotation, context.timeSignature);
+    return result(nextSong, { cursorUnit: nextUnits.at(-1) ?? 0 }, null, song);
+  }
+
+  if (action.type === 'insert-sequence') {
+    if (!action.tokens.length) return result(song, safeCursor, null);
+    let workingSong = song;
+    let workingCursor = safeCursor;
+    for (const token of action.tokens) {
+      const step = applyRhythmEdit(workingSong, target, workingCursor, { type: 'insert', token });
+      if (step.error) return result(song, safeCursor, step.error);
+      workingSong = step.song;
+      workingCursor = step.cursor;
+    }
+    return result(workingSong, workingCursor, null, song);
   }
 
   if (action.type === 'insert') {
@@ -522,6 +559,44 @@ export const applyRhythmEdit = (
       getCursorUnitsForNotation(serialized.notation, context.timeSignature)
     );
     return result(nextSong, nextCursor, null, song);
+  }
+
+  if (action.type === 'toggle-rest' || action.type === 'toggle-triplet' || action.type === 'step-duration') {
+    if (targetIndex === -1) {
+      if (action.type === 'step-duration') return result(song, safeCursor, null);
+      return applyRhythmEdit(song, target, safeCursor, { type: 'insert', token: action.type === 'toggle-rest' ? 'qr' : 'q3' });
+    }
+    const event = context.events[targetIndex];
+    let token: string;
+    if (action.type === 'toggle-rest') {
+      token = event.isSlash ? 'qr' : buildRhythmToken({ ...event, isRest: !event.isRest });
+    } else if (action.type === 'toggle-triplet') {
+      if (event.isSlash || event.base === 'w' || event.base === 'h') {
+        return result(song, safeCursor, '三連音適用於四分、八分與十六分音符。');
+      }
+      token = buildRhythmToken({ ...event, triplet: !event.triplet, dotted: false });
+    } else {
+      if (event.isSlash) return result(song, safeCursor, '/ 不能調整時值。');
+      const durations: RhythmBase[] = ['s', 'e', 'q', 'h', 'w'];
+      const base = durations[durations.indexOf(event.base) + action.direction];
+      if (!base) return result(song, safeCursor, null);
+      if ((base === 'w' || base === 'h') && (event.crossHead || event.triplet)) {
+        return result(song, safeCursor, '請先取消三連音或叉形音頭，再延長時值。');
+      }
+      token = buildRhythmToken({ ...event, base });
+    }
+    const replacement = parseEditableToken(token, context.timeSignature);
+    if (!replacement) return result(song, safeCursor, '無效的節奏符號。');
+    const positioned = positionEvent(replacement, event.startUnit);
+    const boundary = context.events[targetIndex + 1]?.startUnit ?? context.barUnits;
+    if (rhythmUnitsGreater(positioned.endUnit, boundary)) {
+      return result(song, safeCursor, '這個位置沒有足夠的節拍空間。');
+    }
+    const nextEvents = [...context.events];
+    nextEvents[targetIndex] = positioned;
+    const serialized = serializeEvents(nextEvents, context.timeSignature);
+    if (serialized.error) return result(song, safeCursor, serialized.error);
+    return result(writeNotation(song, target, serialized.notation), { cursorUnit: positioned.endUnit }, null, song);
   }
 
   if (targetIndex === -1) return result(song, safeCursor, null);

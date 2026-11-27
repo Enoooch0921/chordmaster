@@ -87,6 +87,16 @@ export const KEYBOARD_SHORTCUT_SECTIONS: KeyboardShortcutSection[] = [
         context: { en: 'Choose content before pasting into the hovered or selected destination; Escape cancels', zh: '選擇內容後貼到滑鼠所在或選取的小節；Escape 取消' }
       },
       {
+        keys: ['Ctrl/Cmd + D'],
+        action: { en: 'Duplicate selected measures right after the selection', zh: '在最後一個選取小節後重複整組小節' },
+        context: { en: 'Select bars with Ctrl/Cmd + click or Shift + click; Undo restores in one step', zh: '先多選小節再按 Ctrl/Cmd + D，可一步復原' }
+      },
+      {
+        keys: ['Option/Alt + C / R / J / T'],
+        action: { en: 'Switch between Chords, Rhythm, Jianpu, and Text modes', zh: '快速切換和弦（C）、節奏（R）、簡譜（J）、文字（T）模式' },
+        context: { en: 'Preview quick editor', zh: '預覽快捷編輯' }
+      },
+      {
         keys: ['Backspace', 'Delete'],
         action: { en: 'Delete selected whole bars', zh: '刪除選取的完整小節' },
         context: { en: 'Select bars with Ctrl/Cmd + click; Undo restores the whole selection in one step', zh: '以 Ctrl/Cmd + 點選多選小節；可一次復原整批刪除' }
@@ -122,7 +132,7 @@ export const KEYBOARD_SHORTCUT_SECTIONS: KeyboardShortcutSection[] = [
       {
         keys: ['Option/Alt + ArrowLeft', 'Option/Alt + ArrowRight'],
         action: { en: 'Nudge the selected chord by half a beat (add Shift for 16th)', zh: '將目前和弦向左或向右微調半拍（加 Shift 為十六分拍）' },
-        context: { en: 'Chord mode; returns offbeat chords like 3& onto beat 3 or 4', zh: '和弦模式；可將 3& 直接移回第 3 或第 4 拍正拍' }
+        context: { en: 'Chord mode, including adjacent bars in the same section', zh: '和弦模式，可將 3& 移到第 3 或第 4 拍，也可跨到同段的相鄰小節' }
       },
       {
         keys: ['Shift + Space'],
@@ -168,12 +178,17 @@ export const KEYBOARD_SHORTCUT_SECTIONS: KeyboardShortcutSection[] = [
     title: { en: 'Rhythm', zh: '節奏' },
     shortcuts: [
       {
-        keys: ['W', 'H', 'Q', 'E', 'S'],
-        action: { en: 'Insert whole, half, quarter, eighth, or sixteenth note', zh: '輸入全音符、二分、四分、八分或十六分音符' }
+        keys: ['1', '2', '4', '8', '6', 'W', 'H', 'Q', 'E', 'S'],
+        action: { en: 'Insert whole, half, quarter, eighth, or sixteenth note (add Shift with W–S for rests)', zh: '輸入全（1）、二分（2）、四分（4）、八分（8）或十六分（6）音符（亦支援 W/H/Q/E/S；加 Shift 為休止）' }
       },
       {
-        keys: ['R'],
-        action: { en: 'Insert a quarter rest', zh: '輸入四分休止符' }
+        keys: ['0', 'R'],
+        action: { en: 'Toggle the current note/rest (0), or insert a quarter rest (R)', zh: '按 0 將目前／剛輸入的音符切換為同值休止符（空白處插入四分休止）；R 插入四分休止' }
+      },
+      {
+        keys: ['ArrowUp', '+', 'ArrowDown', '-'],
+        action: { en: 'Lengthen or shorten the current note or rest by one duration step', zh: '拉長（↑ / +）或縮短（↓ / -）目前音符或休止符的時值一級' },
+        context: { en: 'Preview quick editor', zh: '預覽快捷編輯' }
       },
       {
         keys: ['.', 'D'],
@@ -190,7 +205,17 @@ export const KEYBOARD_SHORTCUT_SECTIONS: KeyboardShortcutSection[] = [
       },
       {
         keys: ['3'],
-        action: { en: 'Insert triplet rhythm', zh: '輸入三連音節奏' },
+        action: { en: 'Toggle triplet on the current note/rest (or insert quarter triplet on empty bar)', zh: '將目前音符切換為三連音（空白處插入四分三連音）' },
+        context: { en: 'Preview quick editor', zh: '預覽快捷編輯' }
+      },
+      {
+        keys: ['X'],
+        action: { en: 'Cycle cross notehead (solid → × → ×↑)', zh: '循環切換叉形音頭（實心 → × → ×↑）' },
+        context: { en: 'Preview quick editor', zh: '預覽快捷編輯' }
+      },
+      {
+        keys: ['%'],
+        action: { en: 'Repeat previous bar rhythm', zh: '沿用前一小節的節奏' },
         context: { en: 'Preview quick editor', zh: '預覽快捷編輯' }
       },
       {
@@ -219,7 +244,7 @@ export const KEYBOARD_SHORTCUT_SECTIONS: KeyboardShortcutSection[] = [
       },
       {
         keys: ['ArrowUp', 'H', 'ArrowDown', 'L'],
-        action: { en: 'Toggle high or low octave', zh: '切換高八度或低八度' }
+        action: { en: 'Toggle high or low octave (Shift + ArrowUp/ArrowDown steps −2..+2 and adjusts the previous note)', zh: '切換高八度或低八度（Shift + ↑/↓ 可連升／降 −2..+2 並直接修飾剛打完的前一音）' }
       },
       {
         keys: ['#', 'B'],

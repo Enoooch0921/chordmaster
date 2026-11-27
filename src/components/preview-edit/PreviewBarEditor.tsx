@@ -1,4 +1,6 @@
 import './PreviewKeyboard.css';
+import { AuditionPiano } from '../../lib/auditionPiano';
+import { jianpuMidi } from '../../utils/jianpuUtils';
 import ChordAuditionControl from './ChordAuditionControl';
 import { useAuditionPreferences } from '../../hooks/useAuditionPreferences';
 import KeyboardSurface from './KeyboardSurface';
@@ -20,6 +22,7 @@ import ChordTimingReviewEditor from './ChordTimingReviewEditor';
 import {
   indexTimingReviews,
   inspectChartChordDrop,
+  transferChartChord,
   timingBarKey,
   confirmChordTiming,
   moveChordToBeat,
@@ -56,6 +59,8 @@ import {
   Scissors,
   Trash2,
   Undo2,
+  Volume2,
+  VolumeX,
   X
 } from 'lucide-react';
 import type { AnnotationColorId, AppLanguage, Bar, Key, NavigationMarker, Song } from '../../types';
@@ -66,7 +71,7 @@ import {
   type PreviewNotationMode
 } from '../../lib/previewEditSession';
 import type { PreviewEditorDeviceLayout } from '../../lib/previewEditorLayout';
-import { getRestGlyph, parseTimeSignature } from '../../utils/rhythmUtils';
+import { getRestGlyph, parseRhythmNotation, parseTimeSignature } from '../../utils/rhythmUtils';
 import { getJianpuDurationUnits, getJianpuGraceNotes, type JianpuInputMode, type JianpuGraceNote } from '../../utils/jianpuUtils';
 import KeyPicker from '../KeyPicker';
 import ChordTimingArrow from '../ChordTimingArrow';
@@ -100,6 +105,7 @@ import {
   getEffectiveTimeSignatureForBar,
   getMultiMeasureRestPlacementError,
   getSongDisplayKeyStates,
+  getBarDisplayKey,
   insertChordBeatBeforeSlot,
   isBarCompletelyEmpty,
   normalizeChordTextInput,
@@ -112,7 +118,7 @@ import {
   updateEditableBarFields,
   updateBarById
 } from '../../lib/songEditing';
-import { getTransposeOffset, transposeKeyWithPreference } from '../../utils/musicUtils';
+import { getTransposeOffset, parseNashvilleToChord, transposeKeyWithPreference } from '../../utils/musicUtils';
 import {
   JianpuInputGlyph,
   JianpuTripletKeyGlyph,
@@ -174,6 +180,26 @@ const EXPANDED_QUALITIES = ['9', 'maj9', 'm9', '11', 'm11', '13', 'm13', 'mMaj7'
 const PICKER_QUALITIES = ['m6', 'sus2', 'dim7', 'aug', ...EXPANDED_QUALITIES];
 const TIME_SIGNATURES = ['2/2', '3/2', '2/4', '3/4', '4/4', '5/4', '6/4', '7/4', '3/8', '5/8', '6/8', '7/8', '9/8', '12/8'];
 const ENDINGS = ['1', '2', '3', '1,2'];
+const RHYTHM_NUMBER_MAP: Record<string, 'w' | 'h' | 'q' | 'e' | 's'> = { '1': 'w', '2': 'h', '4': 'q', '8': 'e', '6': 's' };
+const RHYTHM_PATTERNS: ReadonlyArray<{ label: string; zh: string; en: string; tokens: string[] }> = [
+  { label: '♪ ♩ ♪', zh: '八分、四分、八分切分音', en: 'Syncopated e q e', tokens: ['e', 'q', 'e'] },
+  { label: '♪. 𝅘𝅥𝅯', zh: '附點八分接十六分音符', en: 'Dotted 8th + 16th', tokens: ['e.', 's'] },
+  { label: '𝅘𝅥𝅯 ♪ 𝅘𝅥𝅯', zh: '十六分、八分、十六分切分音', en: '16th syncopation s e s', tokens: ['s', 'e', 's'] },
+  { label: '♩ ♪ ♪', zh: '四分接兩個八分音符', en: 'Quarter + two 8ths', tokens: ['q', 'e', 'e'] },
+  { label: '♪ ♪ ♩', zh: '兩個八分接四分音符', en: 'Two 8ths + quarter', tokens: ['e', 'e', 'q'] },
+  { label: '♪ 𝅘𝅥𝅯 𝅘𝅥𝅯', zh: '八分接兩個十六分音符', en: '8th + two 16ths', tokens: ['e', 's', 's'] },
+  { label: '𝅘𝅥𝅯 𝅘𝅥𝅯 ♪', zh: '兩個十六分接八分音符', en: 'Two 16ths + 8th', tokens: ['s', 's', 'e'] }
+];
+const QUICK_BAR_LABELS = ['Pno', 'EG', 'AG', 'Bass', 'Dr', 'Keys', 'Band', 'All', 'Vocal'] as const;
+const QUICK_BAR_ANNOTATIONS = ['Kick in', 'Drums in', 'All in', 'Build', 'Diamond', 'Breakdown', 'Soft', 'Tacet', 'Rit.', 'A tempo'] as const;
+const DIATONIC_WORSHIP_DEGREES = ['1/3', '5/7', '4/6', '6m7', '2m7', '4maj7', '5sus4'] as const;
+
+function toggleAnnotationCue(annotation: string | undefined, cue: string) {
+  const lines = annotation ? annotation.split('\n') : [];
+  return (lines.some(line => line.trim() === cue)
+    ? lines.filter(line => line.trim() !== cue)
+    : [cue, ...lines]).join('\n') || undefined;
+}
 
 const getEndingShortcutDigit = (key: string, code: string) => {
   const codeMatch = code.match(/^(?:Digit|Numpad)([1-9])$/);
@@ -357,6 +383,11 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const [landscapeChordPage, setLandscapeChordPage] = React.useState<'input'|'tools'>('input');
   const [auditionFeedbackHost, setAuditionFeedbackHost] = React.useState<HTMLDivElement | null>(null);
   const auditionPreferences = useAuditionPreferences(userId, 'chord');
+  const entryPiano = React.useRef<AuditionPiano | null>(null);
+  React.useEffect(() => () => {
+    entryPiano.current?.dispose();
+    entryPiano.current = null;
+  }, [sourceSession.notationMode, auditionPreferences.jianpuEntry, userId]);
   const [auditionSelection, setAuditionSelection] = React.useState<{
     cursor: PreviewNotationCursor | undefined; anchorKey: string; orderedIndex?: number; beat?: number; offset?: number
   } | null>(null);
@@ -385,6 +416,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const initialAnchor = React.useRef(session.target.anchorRect);
   const chordCaptureRef = React.useRef<HTMLInputElement>(null);
   const multiRestInputRef = React.useRef<HTMLInputElement>(null);
+  const keepTextModeRef = React.useRef(false);
 
   const located = findSongBar(session.draftSong, session.target);
   const bar = located?.bar;
@@ -444,8 +476,41 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const barDisplayKey = keyStates.barActiveKeys[sectionIndex]?.[barIndex] ?? barDisplayBaseKey;
   const barTargetKey = bar?.keyChangeTo ? barDisplayKey : undefined;
 
+  const quickChordSuggestions = React.useMemo(() => {
+    if (notationMode !== 'chords' || !bar || bar.chordKeyUnspecified) return [] as string[];
+    return DIATONIC_WORSHIP_DEGREES.map(degree => (
+      chordInputMode === 'nashville' ? degree : parseNashvilleToChord(degree, displayedKey)
+    ));
+  }, [bar, displayedKey, chordInputMode, notationMode]);
+  const quickText = React.useMemo(() => {
+    const labels = new Set<string>();
+    const annotations = new Set<string>();
+    if (mode === 'text') {
+      for (const section of session.draftSong.sections) {
+        for (const bar of section.bars) {
+          const label = bar.label?.trim();
+          const cues = bar.annotation?.split('\n') ?? [];
+          if (label && label.length <= 24) labels.add(label);
+          for (const line of cues) {
+            const cue = line.trim();
+            if (cue && cue.length <= 36 && !/待(?:檢查|確認)/.test(cue)) annotations.add(cue);
+          }
+        }
+      }
+    }
+    return {
+      labels: [...new Set([...labels, ...QUICK_BAR_LABELS])].slice(0, 12),
+      annotations: [...new Set([...annotations, ...QUICK_BAR_ANNOTATIONS])].slice(0, 12)
+    };
+  }, [mode, session.draftSong.sections]);
+
   React.useEffect(() => {
-    setMode(modeForField(session.target.field));
+    if (keepTextModeRef.current) {
+      keepTextModeRef.current = false;
+      setMode('text');
+    } else {
+      setMode(modeForField(session.target.field));
+    }
     setActivePicker(null);
     setPickerAnchor(null);
     setNotationActionError(null);
@@ -481,12 +546,20 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   }, [bar?.id, bar?.chords]);
 
   React.useEffect(() => {
-    if (deviceLayout !== 'desktop' || notationMode !== 'chords' || session.target.field !== 'chords') return;
+    if (deviceLayout !== 'desktop') return;
+    if (mode === 'text') {
+      const active = document.activeElement;
+      if (!active?.closest('[data-text-fields-view]')) {
+        panelRef.current?.querySelector<HTMLTextAreaElement>('#preview-text-annotation')?.focus({ preventScroll: true });
+      }
+      return;
+    }
+    if (notationMode !== 'chords' || session.target.field !== 'chords') return;
     const capture = chordCaptureRef.current;
     capture?.focus({ preventScroll: true });
     if (editOffset !== undefined) capture?.select();
     else capture?.setSelectionRange(capture.value.length, capture.value.length);
-  }, [deviceLayout, notationMode, session.previewIdentity, session.target.barId, session.target.field, session.target.slotIndex, editOffset]);
+  }, [deviceLayout, mode, notationMode, session.previewIdentity, session.target.barId, session.target.field, session.target.slotIndex, editOffset]);
 
   React.useEffect(() => {
     const node = panelRef.current;
@@ -621,6 +694,16 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       noteIndex: jianpuCursor.noteIndex ?? null
     }, action, jianpuInputMode, jianpuPitchContext ?? (voiceTarget ? buildJianpuPitchContext(session.draftSong) : undefined));
     setNotationActionError(result.error);
+    if (auditionPreferences.jianpuEntry && action.type === 'insert-pitch' && result.enteredPitch && !bar?.chordKeyUnspecified) {
+      const { pitch, accidental, octave } = result.enteredPitch;
+      const midi = jianpuMidi(pitch, accidental, octave, getBarDisplayKey(auditionSong, session.target));
+      const piano = entryPiano.current ??= new AuditionPiano();
+      const duration = 0.32;
+      void piano.play({ sounds: [{ start: 0, end: duration, notes: [midi] }], bars: [], duration, fallbackTempo: false },
+        () => {}, () => {}, () => piano.stop()).catch(() => {
+          if (entryPiano.current === piano) setNotationActionError(language === 'zh' ? '無法播放簡譜試聽音。' : 'Could not play the note.');
+        });
+    }
     setJianpuInputMode(result.inputMode);
     const insertionPreview = result.cursor.noteIndex === null ? {
       inputUnits: getJianpuDurationUnits(result.inputMode.duration, result.inputMode.dotted, result.inputMode.triplet)
@@ -704,6 +787,23 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     onNotationModeChange(nextMode);
   }
 
+  function openTextFields() {
+    setMode('text');
+    setActivePicker(null);
+    setGraceDraft(null);
+    setCollapsed(false);
+    setSubdivisionsExpanded(false);
+  }
+
+  function switchKeyboardPage(code: string) {
+    if (code === 'KeyT' && !isPickup) openTextFields();
+    else if (code === 'KeyC' && !isPickup) changeNotationMode('chords');
+    else if (code === 'KeyR') changeNotationMode('rhythm');
+    else if (code === 'KeyJ') changeNotationMode('jianpu');
+    else return false;
+    return true;
+  }
+
   function navigateNotation(direction: 'previous' | 'next') {
     if (notationMode === 'rhythm') {
       const result = applyRhythmAction({ type: 'move', direction: direction === 'previous' ? -1 : 1 });
@@ -732,7 +832,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       const isButtonActivation = element?.tagName === 'BUTTON' && (event.key === 'Enter' || event.key === ' ');
       const meta = event.metaKey || event.ctrlKey;
       const isChordEditing = !hasUnmeteredChords(bar) && !bar.chordTimingUnspecified && notationMode === 'chords' && session.target.field === 'chords';
-      if (event.defaultPrevented) return;
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
       if (notationMode === 'chords' && !event.isComposing && event.altKey && !meta && !event.shiftKey && event.code === 'KeyP') {
         const button = panelRef.current?.querySelector<HTMLButtonElement>('[data-audition-button]');
         if (button) {
@@ -754,6 +854,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         event.preventDefault();
         return;
       }
+      if (event.altKey && !meta && !event.shiftKey && (!isTyping || panelRef.current?.contains(element))
+        && switchKeyboardPage(event.code)) {
+        event.preventDefault();
+        return;
+      }
+      if (mode === 'text') return;
       if (
         !isTyping
         && !isButtonActivation
@@ -834,16 +940,35 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         }
       } else if (notationMode === 'rhythm' && ['w', 'h', 'q', 'e', 's'].includes(event.key.toLowerCase())) {
         event.preventDefault();
-        applyRhythmAction({ type: 'insert', token: event.key.toLowerCase() });
+        const base = event.key.toLowerCase();
+        applyRhythmAction({ type: 'insert', token: event.shiftKey ? `${base}r` : base });
+      } else if (notationMode === 'rhythm' && !event.shiftKey && event.key in RHYTHM_NUMBER_MAP) {
+        event.preventDefault();
+        applyRhythmAction({ type: 'insert', token: RHYTHM_NUMBER_MAP[event.key] });
+      } else if (notationMode === 'rhythm' && !event.shiftKey && event.key === '0') {
+        event.preventDefault();
+        applyRhythmAction({ type: 'toggle-rest' });
+      } else if (notationMode === 'rhythm' && (event.key === 'ArrowUp' || event.key === '+' || event.key === '=')) {
+        event.preventDefault();
+        applyRhythmAction({ type: 'step-duration', direction: 1 });
+      } else if (notationMode === 'rhythm' && (event.key === 'ArrowDown' || event.key === '-')) {
+        event.preventDefault();
+        applyRhythmAction({ type: 'step-duration', direction: -1 });
       } else if (notationMode === 'rhythm' && event.key === '/') {
         event.preventDefault();
         applyRhythmAction({ type: 'insert', token: '/' });
       } else if (notationMode === 'rhythm' && event.key.toLowerCase() === 'r') {
         event.preventDefault();
-        applyRhythmAction({ type: 'insert', token: 'qr' });
+        applyRhythmAction(event.shiftKey ? { type: 'toggle-rest' } : { type: 'insert', token: 'qr' });
       } else if (notationMode === 'rhythm' && event.key === '3') {
         event.preventDefault();
-        applyRhythmAction({ type: 'insert', token: 'q3' });
+        applyRhythmAction({ type: 'toggle-triplet' });
+      } else if (notationMode === 'rhythm' && event.key.toLowerCase() === 'x') {
+        event.preventDefault();
+        applyRhythmAction({ type: 'cycle-cross-head' });
+      } else if (notationMode === 'rhythm' && event.key === '%') {
+        event.preventDefault();
+        applyRhythmAction({ type: 'copy-previous' });
       } else if (notationMode === 'rhythm' && event.key === '.') {
         event.preventDefault();
         applyRhythmAction({ type: 'toggle-dot' });
@@ -874,6 +999,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         } else {
           toggleJianpuDuration(event.key.toLowerCase() === 'e' ? 'eighth' : 'sixteenth');
         }
+      } else if (notationMode === 'jianpu' && ((event.shiftKey && event.key === 'ArrowDown') || event.key === '_')) {
+        event.preventDefault();
+        applyJianpuAction({ type: 'step-octave', delta: -1, targetPrevious: true });
+      } else if (notationMode === 'jianpu' && ((event.shiftKey && event.key === 'ArrowUp') || event.key === '+' || event.key === '=')) {
+        event.preventDefault();
+        applyJianpuAction({ type: 'step-octave', delta: 1, targetPrevious: true });
       } else if (notationMode === 'jianpu' && (event.key === 'ArrowDown' || event.key.toLowerCase() === 'l')) {
         event.preventDefault();
         applyJianpuAction({ type: 'set-octave', octave: jianpuInputMode.octave < 0 ? 0 : -1 });
@@ -1016,11 +1147,29 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
   const deleteLastChordCharacter = () => {
     if (!displayedChordRun) {
+      if (activeChordOffset !== 0) {
+        selectChordPosition(session.target.slotIndex, 0);
+        return;
+      }
       onNavigate('previous');
       return;
     }
     const characters = Array.from(displayedChordRun);
     applyDirectChordText(characters.slice(0, -1).join(''));
+  };
+
+  const fillRemainingSlashes = () => {
+    if (!bar || hasUnmeteredChords(bar) || bar.chordTimingUnspecified) return;
+    let nextSong = session.draftSong;
+    const ownership = getChordDisplaySlotOwnership(bar.chords, beatCount);
+    for (let slotIdx = session.target.slotIndex + 1; slotIdx < beatCount; slotIdx += 1) {
+      if (!ownership[slotIdx] && !bar.chordSubdivisions?.some(entry => entry.beat === slotIdx)) {
+        nextSong = setChordAtBeatSlot(nextSong, { ...session.target, slotIndex: slotIdx }, '/');
+      }
+    }
+    if (nextSong !== session.draftSong) {
+      onApplyDraft(nextSong, { mergeKey: `fill-slashes:${bar.id}:${session.target.slotIndex}` });
+    }
   };
 
   const deleteEmptyBarIfPossible = () => {
@@ -1448,14 +1597,40 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             : { ...rhythmCursor, voiceId: undefined });
         }}
       />;
-  const rhythmAdvancedKeys = <div data-key-surface="character" className="grid grid-cols-3 gap-2 [&>button]:!min-h-11">
-            <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === 'q' && selectedRhythmEvent.triplet && !selectedRhythmEvent.isRest ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token: 'q3' })} aria-label={language === 'zh' ? '四分三連音' : 'Quarter-note triplet'}><RhythmStaffKeyGlyph base="q" triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
-            <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === 'e' && selectedRhythmEvent.triplet && !selectedRhythmEvent.isRest ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token: 'e3' })} aria-label={language === 'zh' ? '八分三連音' : 'Eighth-note triplet'}><RhythmStaffKeyGlyph base="e" triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
-            <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === 's' && selectedRhythmEvent.triplet && !selectedRhythmEvent.isRest ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token: 's3' })} aria-label={language === 'zh' ? '十六分三連音' : 'Sixteenth-note triplet'}><RhythmStaffKeyGlyph base="s" triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
-            <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === 'q' && selectedRhythmEvent.triplet && selectedRhythmEvent.isRest ? activeButtonClass : ''}`} aria-pressed={selectedRhythmEvent?.base === 'q' && Boolean(selectedRhythmEvent.triplet && selectedRhythmEvent.isRest)} onClick={() => applyRhythmAction({ type: 'insert', token: 'q3r' })} aria-label={language === 'zh' ? '四分三連休止' : 'Quarter-triplet rest'}><RhythmStaffKeyGlyph base="q" isRest triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
-            <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === 'e' && selectedRhythmEvent.triplet && selectedRhythmEvent.isRest ? activeButtonClass : ''}`} aria-pressed={selectedRhythmEvent?.base === 'e' && Boolean(selectedRhythmEvent.triplet && selectedRhythmEvent.isRest)} onClick={() => applyRhythmAction({ type: 'insert', token: 'e3r' })} aria-label={language === 'zh' ? '八分三連休止' : 'Eighth-triplet rest'}><RhythmStaffKeyGlyph base="e" isRest triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
-            <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === 's' && selectedRhythmEvent.triplet && selectedRhythmEvent.isRest ? activeButtonClass : ''}`} aria-pressed={selectedRhythmEvent?.base === 's' && Boolean(selectedRhythmEvent.triplet && selectedRhythmEvent.isRest)} onClick={() => applyRhythmAction({ type: 'insert', token: 's3r' })} aria-label={language === 'zh' ? '十六分三連休止' : 'Sixteenth-triplet rest'}><RhythmStaffKeyGlyph base="s" isRest triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
+  const rhythmAdvancedKeys = <div className="space-y-2.5">
+    <div data-key-surface="character" className="grid grid-cols-3 gap-2 [&>button]:!min-h-11">
+      <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === 'q' && selectedRhythmEvent.triplet && !selectedRhythmEvent.isRest ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token: 'q3' })} aria-label={language === 'zh' ? '四分三連音' : 'Quarter-note triplet'}><RhythmStaffKeyGlyph base="q" triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
+      <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === 'e' && selectedRhythmEvent.triplet && !selectedRhythmEvent.isRest ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token: 'e3' })} aria-label={language === 'zh' ? '八分三連音' : 'Eighth-note triplet'}><RhythmStaffKeyGlyph base="e" triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
+      <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === 's' && selectedRhythmEvent.triplet && !selectedRhythmEvent.isRest ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token: 's3' })} aria-label={language === 'zh' ? '十六分三連音' : 'Sixteenth-note triplet'}><RhythmStaffKeyGlyph base="s" triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
+      <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === 'q' && selectedRhythmEvent.triplet && selectedRhythmEvent.isRest ? activeButtonClass : ''}`} aria-pressed={selectedRhythmEvent?.base === 'q' && Boolean(selectedRhythmEvent.triplet && selectedRhythmEvent.isRest)} onClick={() => applyRhythmAction({ type: 'insert', token: 'q3r' })} aria-label={language === 'zh' ? '四分三連休止' : 'Quarter-triplet rest'}><RhythmStaffKeyGlyph base="q" isRest triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
+      <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === 'e' && selectedRhythmEvent.triplet && selectedRhythmEvent.isRest ? activeButtonClass : ''}`} aria-pressed={selectedRhythmEvent?.base === 'e' && Boolean(selectedRhythmEvent.triplet && selectedRhythmEvent.isRest)} onClick={() => applyRhythmAction({ type: 'insert', token: 'e3r' })} aria-label={language === 'zh' ? '八分三連休止' : 'Eighth-triplet rest'}><RhythmStaffKeyGlyph base="e" isRest triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
+      <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === 's' && selectedRhythmEvent.triplet && selectedRhythmEvent.isRest ? activeButtonClass : ''}`} aria-pressed={selectedRhythmEvent?.base === 's' && Boolean(selectedRhythmEvent.triplet && selectedRhythmEvent.isRest)} onClick={() => applyRhythmAction({ type: 'insert', token: 's3r' })} aria-label={language === 'zh' ? '十六分三連休止' : 'Sixteenth-triplet rest'}><RhythmStaffKeyGlyph base="s" isRest triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
+    </div>
+    <div className="space-y-1 border-t border-[var(--keyboard-border)] pt-2">
+      <div className="text-[11px] font-semibold text-[var(--keyboard-muted)]">{language === 'zh' ? '常用切分節奏' : 'Common rhythm patterns'}</div>
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label={language === 'zh' ? '常用切分節奏' : 'Common rhythm patterns'}>
+        {RHYTHM_PATTERNS.map((pattern) => (
+          <button
+            key={pattern.zh}
+            type="button"
+            className="min-h-9 rounded-lg border px-2.5 text-xs font-semibold"
+            onClick={() => applyRhythmAction({ type: 'insert-sequence', tokens: pattern.tokens })}
+            aria-label={language === 'zh' ? `插入${pattern.zh}` : `Insert ${pattern.en}`}
+            title={language === 'zh' ? pattern.zh : pattern.en}
+          >
+            {pattern.label}
+          </button>
+        ))}
+      </div>
+    </div>
   </div>;
+  const parsedBarRhythm = notationMode === 'rhythm' && bar ? parseRhythmNotation(bar.rhythm ?? '', effectiveBarTimeSignature) : null;
+  const rhythmBarUnits = parsedBarRhythm?.barUnits ?? parseTimeSignature(effectiveBarTimeSignature).barUnits;
+  const rhythmFilledUnits = Math.min(rhythmBarUnits, parsedBarRhythm?.totalUnits ?? 0);
+  const rhythmFillPercent = rhythmBarUnits > 0 ? Math.min(100, Math.round((rhythmFilledUnits / rhythmBarUnits) * 100)) : 0;
+  const rhythmBeatDivisor = parseTimeSignature(effectiveBarTimeSignature).beatUnits || 4;
+  const rhythmFilledBeatsText = Number((rhythmFilledUnits / rhythmBeatDivisor).toFixed(2));
+  const rhythmTotalBeatsText = Number((rhythmBarUnits / rhythmBeatDivisor).toFixed(2));
   const repeatBarTitle = language === 'zh' ? '加入重複前一小節的記號' : 'Insert a previous-bar repeat mark';
   const keyboardContent = notationMode === 'chords' && subdivisionsExpanded ? (
     <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2"><ChordSubdivisionsEditor selectedBeat={session.target.slotIndex} onSelectChord={entry => setAuditionSelection({ anchorKey: sourceSession.target.anchorKey, cursor: chordCursor, beat: entry.beat, offset: entry.offset })} bar={bar} beats={beatCount} language={language} onChange={chordSubdivisions => updateFields({chordSubdivisions})} onMoveToDownbeat={(entry, targetBeat) => {
@@ -1477,6 +1652,17 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       {!compactLandscapeKeyboard && voiceControls}
 
       {notationMode === 'chords' && mode === 'common' && (
+        <>
+        {!compactHardwareMode && !compactLandscapeKeyboard && quickChordSuggestions.length > 0 && (
+          <div className="keyboard-quick-chips" data-chord-suggestions role="group" aria-label={language === 'zh' ? '常用順階和弦' : 'Common in-key chords'}>
+            {quickChordSuggestions.map((chord) => (
+              <button key={chord} type="button" onClick={() => applyDisplayedChord(chord)}
+                className={displayedChord === chord ? 'keyboard-key-active' : undefined}>
+                {chord}
+              </button>
+            ))}
+          </div>
+        )}
         <div className={`grid flex-1 ${deviceLayout === 'phone' ? 'min-h-[192px] grid-rows-[repeat(4,minmax(32px,1fr))] [&>div]:gap-1' : compactHardwareMode ? 'min-h-[96px] grid-rows-[repeat(2,minmax(44px,1fr))]' : 'min-h-[212px] grid-rows-[repeat(4,minmax(36px,1fr))]'} gap-2`} style={compactLandscapeKeyboard?{gridTemplateRows:"44px 44px",minHeight:94}:undefined} data-keyboard-view="main" data-desktop-compact={compactHardwareMode ? 'true' : undefined}>
           {!compactHardwareMode && (!compactLandscapeKeyboard || landscapeChordPage==='input') && (
             <>
@@ -1609,8 +1795,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
               {activePicker === 'special' && (
                 <div className="flex min-h-0 flex-1 flex-col gap-1.5">
-                  <div className="grid min-h-0 flex-1 grid-cols-7 gap-1.5">
+                  <div className="grid min-h-0 flex-1 grid-cols-8 gap-1.5">
                     <button type="button" className={`${buttonClass} min-h-0 px-0 text-base`} onClick={() => { applyDisplayedChord('/'); setActivePicker(null); }} aria-label={language === 'zh' ? '拍點斜線' : 'Beat slash'}>/</button>
+                    <button type="button" className={`${buttonClass} min-h-0 px-0 text-xs`} onClick={() => { fillRemainingSlashes(); setActivePicker(null); }} title={language === 'zh' ? '將此拍後空白拍補滿 /' : 'Fill remaining empty beats with /'} aria-label={language === 'zh' ? '補滿延拍斜線' : 'Fill remaining slashes'}>/…</button>
                     <button type="button" data-keyboard-repeat-key title={repeatBarTitle} className={`${buttonClass} min-h-0 px-0`} onClick={() => { applyDisplayedChord('%'); setActivePicker(null); }} aria-label={language === 'zh' ? '重複前一小節' : 'Repeat previous bar'}><BarRepeatGlyph className="h-7 w-7 shrink-0" /></button>
                     <button type="button" className={`${buttonClass} min-h-0 px-0`} onClick={() => { applyDisplayedChord('N.C.'); setActivePicker(null); }} aria-label="N.C.">N.C.</button>
                     {([['0', 'q', '四分休止'], ['0h', 'h', '二分休止'], ['0w', 'w', '全休止']] as const).map(([value, base, label]) => {
@@ -1689,6 +1876,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             </AnimatedPopover>
           , document.body)}
         </div>
+        </>
       )}
 
       {notationMode === 'chords' && mode === 'advanced' && (
@@ -1780,6 +1968,21 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       )}
 
       {notationMode === 'rhythm' && mode !== 'text' && (
+        <div className="flex min-h-0 flex-1 flex-col gap-1.5">
+          {!compactLandscapeKeyboard && (
+            <div className="rhythm-quick-bar" data-rhythm-meter-bar>
+              <div className="rhythm-fill-meter" role="progressbar" aria-valuemin={0} aria-valuemax={rhythmTotalBeatsText} aria-valuenow={rhythmFilledBeatsText} aria-label={language === 'zh' ? `小節節奏進度 ${rhythmFilledBeatsText} / ${rhythmTotalBeatsText} 拍` : `Bar rhythm fill ${rhythmFilledBeatsText} / ${rhythmTotalBeatsText} beats`}>
+                <div className="rhythm-fill-track"><span className="rhythm-fill-value" data-full={rhythmFillPercent >= 100 || undefined} style={{ transform: `scaleX(${rhythmFillPercent / 100})` }} /></div>
+                <span className="rhythm-fill-label">{rhythmFillPercent >= 100 ? (language === 'zh' ? '已滿' : 'Full') : `${rhythmFilledBeatsText}/${rhythmTotalBeatsText}`}</span>
+              </div>
+              <div className="rhythm-quick-actions" role="group" aria-label={language === 'zh' ? '節奏快速調整' : 'Quick rhythm adjustments'}>
+                <button type="button" disabled={!selectedRhythmEvent || selectedRhythmEvent.isSlash || selectedRhythmEvent.base === 's'} onClick={() => applyRhythmAction({ type: 'step-duration', direction: -1 })} aria-label={language === 'zh' ? '縮短節奏時值' : 'Shorten rhythm duration'} title={language === 'zh' ? '縮短時值（↓ / -）' : 'Shorter (Down / -)'}>−</button>
+                <button type="button" disabled={!selectedRhythmEvent || selectedRhythmEvent.isSlash || selectedRhythmEvent.base === 'w'} onClick={() => applyRhythmAction({ type: 'step-duration', direction: 1 })} aria-label={language === 'zh' ? '拉長節奏時值' : 'Lengthen rhythm duration'} title={language === 'zh' ? '拉長時值（↑ / +）' : 'Longer (Up / +)'}>+</button>
+                <button type="button" onClick={() => applyRhythmAction({ type: 'toggle-rest' })} aria-label={language === 'zh' ? '切換目前節奏為休止符' : 'Toggle current rhythm rest'} title={language === 'zh' ? '切換休止符（0）' : 'Toggle rest (0)'}>0</button>
+                {!isPickup && <button type="button" onClick={() => applyRhythmAction({ type: 'copy-previous' })} aria-label={language === 'zh' ? '沿用前一小節節奏' : 'Repeat previous bar rhythm'} title={language === 'zh' ? '沿用前一小節節奏（%）' : 'Repeat previous bar rhythm (%)'}>%</button>}
+              </div>
+            </div>
+          )}
         <div className={`grid min-h-0 flex-1 ${deviceLayout === 'phone' ? (notationActionError ? 'grid-rows-[1fr_1fr_1.56fr_auto]' : 'grid-rows-[1fr_1fr_1.56fr]') : (notationActionError ? 'grid-rows-[1fr_1fr_0.78fr_auto]' : 'grid-rows-[1fr_1fr_0.78fr]')} gap-1.5`} data-keyboard-view="rhythm" style={{ flex: '0 0 auto', gridTemplateColumns: compactLandscapeKeyboard ? 'repeat(12,minmax(0,1fr))' : undefined, gridTemplateRows: compactLandscapeKeyboard ? '44px 44px' : '48px 48px 44px' }}>
           <div className="grid min-h-0 grid-cols-5 gap-1.5" data-rhythm-key-row="notes" data-key-surface="character" style={compactLandscapeKeyboard?{gridColumn:"span 6",gridTemplateColumns:"repeat(6,minmax(0,1fr))"}:{gridTemplateColumns:"repeat(6,minmax(0,1fr))"}}>
             {([['w', '全音符', 'Whole'], ['h', '二分音符', 'Half'], ['q', '四分音符', 'Quarter'], ['e', '八分音符', 'Eighth'], ['s', '十六分音符', 'Sixteenth']] as const).map(([token, zhLabel, enLabel]) => (
@@ -1805,6 +2008,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
           </div>
 
+        </div>
         </div>
       )}
 
@@ -1859,8 +2063,20 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               ? `裝飾音${graceDraft.length > 1 ? ` ${index + 1} ` : ''}${zh}`
               : `Grace ${graceDraft.length > 1 ? `${index + 1} ` : ''}${en}`;
             const update = (changes: Partial<JianpuGraceNote>) => setGraceDraft(graceDraft.map((note, i) => i === index ? { ...note, ...changes } : note));
-            return <div key={index} className="space-y-1">
+            return <div key={index} className="space-y-1.5">
               {graceDraft.length > 1 && <div className="flex items-center justify-between text-xs"><span>{language === 'zh' ? `裝飾音 ${index + 1}` : `Grace ${index + 1}`}</span><button type="button" className="h-11 px-2 text-red-700" aria-label={language === 'zh' ? `移除裝飾音 ${index + 1}` : `Remove grace ${index + 1}`} onClick={() => setGraceDraft(graceDraft.filter((_, i) => i !== index))}>{language === 'zh' ? '移除' : 'Remove'}</button></div>}
+              <div className="grid grid-cols-10 gap-1" role="group" aria-label={label('快速音高', 'quick pitch')}>
+                {(['1', '2', '3', '4', '5', '6', '7'] as const).map(pitch => (
+                  <button key={pitch} type="button" aria-pressed={grace.pitch === pitch}
+                    className={`min-h-9 rounded-md border text-sm font-bold ${grace.pitch === pitch ? activeButtonClass : 'bg-white'}`}
+                    onClick={() => update({ pitch })}>{pitch}</button>
+                ))}
+                {([['', '♮'], ['#', '♯'], ['b', '♭']] as const).map(([acc, glyph]) => (
+                  <button key={glyph} type="button" aria-pressed={grace.accidental === acc}
+                    className={`min-h-9 rounded-md border text-sm font-bold ${grace.accidental === acc ? activeButtonClass : 'bg-white'}`}
+                    onClick={() => update({ accidental: acc })}>{glyph}</button>
+                ))}
+              </div>
               <div className="grid grid-cols-3 gap-2">
                 <label className="text-xs">{language === 'zh' ? '音高' : 'Pitch'}<select aria-label={label('音高', 'pitch')} className="mt-1 h-11 w-full rounded-lg border bg-white px-2 text-base" value={grace.pitch} onChange={event => update({ pitch: event.target.value })}>{['1','2','3','4','5','6','7'].map(pitch => <option key={pitch}>{pitch}</option>)}</select></label>
                 <label className="text-xs">{language === 'zh' ? '升降' : 'Accidental'}<select aria-label={label('升降', 'accidental')} className="mt-1 h-11 w-full rounded-lg border bg-white px-2 text-base" value={grace.accidental} onChange={event => update({ accidental: event.target.value })}><option value="">♮</option><option value="#">♯</option><option value="b">♭</option></select></label>
@@ -1878,24 +2094,64 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       )}
 
       {mode === 'text' && (
-        <div className="flex flex-1 flex-col gap-2" data-text-fields-view="all">
+        <div className="flex flex-1 flex-col gap-2 overflow-y-auto" data-text-fields-view="all">
           <div className="flex shrink-0 items-center gap-2">
             <button type="button" className={utilityKeyClass} onClick={() => { setMode('common'); setActivePicker(null); }} aria-label={language === 'zh' ? `返回${notationMode === 'chords' ? '和弦' : notationMode === 'rhythm' ? '節奏' : '簡譜'}鍵盤` : 'Back to notation keyboard'}>{language === 'zh' ? '返回鍵盤' : 'Back'}</button>
             <span className="text-xs font-black text-slate-600">{language === 'zh' ? '小節文字位置' : 'Bar text positions'}</span>
+            <span className="ml-auto hidden text-[10px] text-slate-500 sm:inline">{language === 'zh' ? 'Enter 返回 · ⌘/Ctrl+Enter 下一小節' : 'Enter back · ⌘/Ctrl+Enter next bar'}</span>
           </div>
-          <div className="grid flex-1 grid-cols-2 gap-2">
-            {([
-              ['label', language === 'zh' ? '小節標籤' : 'Label'],
-              ['annotation', language === 'zh' ? '上方註記' : 'Annotation'],
-              ['leftText', language === 'zh' ? '左側文字' : 'Left text'],
-              ['rightText', language === 'zh' ? '右側文字' : 'Right text']
-            ] as const).map(([field, label]) => (
-              <label key={field} className="flex min-h-0 flex-col gap-1 text-[10px] font-bold text-slate-600" htmlFor={`preview-text-${field}`}>
-                <span>{label}</span>
-                <input id={`preview-text-${field}`} className={`${fieldClass} min-h-11 text-base`} value={sourceBar?.[field] || ''} onChange={(event) => updateFields({ [field]: event.target.value || undefined }, `${field}:${bar.id}`)} />
-              </label>
-            ))}
-          </div>
+          {(() => {
+            const onTextKeyDown = (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+              if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.key !== 'Enter') return;
+              event.preventDefault();
+              event.stopPropagation();
+              if (event.metaKey || event.ctrlKey) {
+                keepTextModeRef.current = true;
+                onNavigate('next', undefined, { bar: true });
+              } else {
+                setMode('common');
+                setActivePicker(null);
+              }
+            };
+            return <div className="flex flex-1 flex-col gap-2">
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold text-slate-600" htmlFor="preview-text-annotation">{language === 'zh' ? '上方註記' : 'Annotation'}</label>
+                <textarea rows={2} id="preview-text-annotation" name="annotation" autoComplete="off" className={`${fieldClass} w-full min-h-10 text-sm`} value={sourceBar?.annotation || ''} onKeyDown={onTextKeyDown} onChange={(event) => updateFields({ annotation: event.target.value || undefined }, `annotation:${bar.id}`)} />
+                <div className="keyboard-quick-chips" role="group" aria-label={language === 'zh' ? '常用上方註記' : 'Quick annotations'}>
+                  {quickText.annotations.map(chip => (
+                    <button key={chip} type="button" aria-pressed={Boolean(sourceBar?.annotation?.split('\n').some(line => line.trim() === chip))}
+                      onClick={() => updateFields({ annotation: toggleAnnotationCue(sourceBar?.annotation, chip) }, `annotation:${bar.id}`)}>
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex min-h-0 flex-col gap-1 text-[10px] font-bold text-slate-600" htmlFor="preview-text-leftText">
+                  <span>{language === 'zh' ? '左側文字' : 'Left text'}</span>
+                  <input id="preview-text-leftText" name="leftText" autoComplete="off" className={`${fieldClass} min-h-10 text-sm`} value={sourceBar?.leftText || ''} onKeyDown={onTextKeyDown} onChange={(event) => updateFields({ leftText: event.target.value || undefined }, `leftText:${bar.id}`)} />
+                </label>
+                <label className="flex min-h-0 flex-col gap-1 text-[10px] font-bold text-slate-600" htmlFor="preview-text-rightText">
+                  <span>{language === 'zh' ? '右側文字' : 'Right text'}</span>
+                  <input id="preview-text-rightText" name="rightText" autoComplete="off" className={`${fieldClass} min-h-10 text-sm`} value={sourceBar?.rightText || ''} onKeyDown={onTextKeyDown} onChange={(event) => updateFields({ rightText: event.target.value || undefined }, `rightText:${bar.id}`)} />
+                </label>
+              </div>
+              <div className="space-y-1">
+                <label className="flex min-h-0 flex-col gap-1 text-[10px] font-bold text-slate-600" htmlFor="preview-text-label">
+                  <span>{language === 'zh' ? '小節標籤' : 'Label'}</span>
+                  <input id="preview-text-label" name="label" autoComplete="off" className={`${fieldClass} min-h-10 text-sm`} value={sourceBar?.label || ''} onKeyDown={onTextKeyDown} onChange={(event) => updateFields({ label: event.target.value || undefined }, `label:${bar.id}`)} />
+                </label>
+                <div className="keyboard-quick-chips" role="group" aria-label={language === 'zh' ? '常用小節標籤' : 'Quick bar labels'}>
+                  {quickText.labels.map(chip => (
+                    <button key={chip} type="button" aria-pressed={sourceBar?.label === chip}
+                      onClick={() => updateFields({ label: sourceBar?.label === chip ? undefined : chip }, `label:${bar.id}`)}>
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>;
+          })()}
           <p className="text-[11px] text-[color:var(--color-text-muted)]">{language === 'zh' ? '文字套用到目前小節，由所有聲部共用。' : 'Text applies to the current bar and is shared by all voices.'}</p>
         </div>
       )}
@@ -1981,10 +2237,28 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           ? (activeChordOffset > 0.5 ? 0.5 : activeChordOffset > 0 ? 0 : -0.5)
           : (activeChordOffset < 0.5 ? 0.5 : 1))
       : beat + activeChordOffset + direction * 0.25;
-    if (rawPos < 0 || rawPos >= beatCount) return false;
-    const destBeat = Math.floor(rawPos);
-    const destOffset = (Math.round((rawPos - destBeat) * 4) / 4) as ChordBeatOffsetValue;
-    return relocateSelectedChord(destBeat, destOffset, 'capture');
+    if (rawPos >= 0 && rawPos < beatCount) {
+      const destBeat = Math.floor(rawPos);
+      return relocateSelectedChord(destBeat, (rawPos - destBeat) as ChordBeatOffsetValue, 'capture');
+    }
+    const neighbor = located?.section.bars[located.barIndex + direction];
+    if (!neighbor?.id || isPickup) return false;
+    const beats = getBeatCount(session.draftSong, neighbor);
+    const position = direction < 0 ? beats + rawPos : rawPos - beatCount;
+    const slotIndex = Math.floor(position);
+    const offset = (position - slotIndex) as ChordBeatOffsetValue;
+    const origin = { ...session.target, beat, beats: beatCount };
+    const destination = { sectionId: origin.sectionId, barId: neighbor.id, beat: slotIndex, beats, offset };
+    const song = transferChartChord(session.draftSong, origin, { chord: storedChord, beat, offset: activeChordOffset }, destination);
+    if (song === session.draftSong) return false;
+    const movedBar = findSongBar(song, destination)!.bar;
+    const rawChordIndex = getChordBeatSlots(movedBar, beats)[slotIndex]?.rawChordIndex ?? null;
+    onApplyDraft(song);
+    setAuditionSelection(null);
+    onNavigate(direction < 0 ? 'previous' : 'next', {
+      kind: 'chord', slotIndex, rawChordIndex, editOffset: offset, auditionOffset: offset
+    }, { bar: true });
+    return true;
   }
 
   const offbeatMoveControls: OffbeatMoveControls | undefined = (() => {
@@ -2109,13 +2383,22 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             );
           })}
           {!isPickup && <button type="button" aria-label={language === 'zh' ? '文字欄位' : 'Text fields'} aria-pressed={mode === 'text'}
-            onClick={() => { setMode('text'); setActivePicker(null); setGraceDraft(null); setCollapsed(false); setSubdivisionsExpanded(false); }}
+            onClick={openTextFields}
             className={`min-w-0 rounded-[10px] px-0.5 text-[10px] font-black leading-none transition-colors ${mode === 'text'
               ? 'bg-white text-indigo-700 shadow-[0_1px_4px_rgba(15,23,42,0.14)]'
               : 'text-slate-600 hover:bg-white/60 hover:text-slate-900'}`}>
             {language === 'zh' ? '文字' : 'Text'}
           </button>}
         </div>
+        {notationMode === 'jianpu' && mode !== 'text' && (
+          <button type="button" className={toolbarButtonClass}
+            aria-label={language === 'zh' ? '輸入簡譜時試聽' : 'Hear jianpu notes on entry'}
+            title={language === 'zh' ? '輸入簡譜時試聽' : 'Hear jianpu notes on entry'}
+            aria-pressed={auditionPreferences.jianpuEntry}
+            onClick={() => auditionPreferences.setJianpuEntry(!auditionPreferences.jianpuEntry)}>
+            {auditionPreferences.jianpuEntry ? <Volume2 size={17} aria-hidden /> : <VolumeX size={17} aria-hidden />}
+          </button>
+        )}
         {compactLandscapeKeyboard && notationMode==='chords' && <div role="group" aria-label="和弦鍵盤頁面" className="flex gap-1">{(['input','tools'] as const).map(page=><button type="button" key={page} aria-pressed={landscapeChordPage===page} className={toolbarButtonClass} onClick={()=>setLandscapeChordPage(page)}>{page==='input'?'輸入':'功能'}</button>)}</div>}
         {headerAudition && previousBeatButton}
         {!phoneAudition && <div data-keyboard-status className="min-w-0 flex-1">
@@ -2190,7 +2473,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         <button type="button" className="ml-auto min-h-8 rounded px-2 text-xs text-rose-700 hover:bg-rose-50" onClick={() => onSourceApplyDraft({ ...sourceSession.draftSong, pickup: undefined })}>{language === 'zh' ? '移除弱起拍' : 'Remove pickup'}</button>
       </div>}
       {bar.chordKeyUnspecified && <p className="px-2 text-xs text-amber-800">{language==='zh'?'目的調未標，保留原譜級數；選擇已確認的調性後可顯示字母和弦。':'Destination key unspecified. Keep source degrees until a confirmed key is selected.'}</p>}
-      {deviceLayout === 'desktop' && notationMode === 'chords' && session.target.field === 'chords' && (
+      {deviceLayout === 'desktop' && mode !== 'text' && notationMode === 'chords' && session.target.field === 'chords' && (
         <input
           ref={chordCaptureRef}
           data-preview-chord-capture
@@ -2198,6 +2481,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           value={displayedChordRun}
           onChange={(event) => applyDirectChordText(event.target.value)}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
             const meta = event.metaKey || event.ctrlKey;
             if (meta && event.key === 'Enter') {
               event.preventDefault();
@@ -2214,6 +2498,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               event.preventDefault();
               event.stopPropagation();
               selectCurrentOffbeat();
+            } else if (!meta && event.altKey && !event.shiftKey && switchKeyboardPage(event.code)) {
+              event.preventDefault();
+              event.stopPropagation();
             } else if (!meta && event.altKey && !event.nativeEvent.isComposing && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
               event.preventDefault();
               event.stopPropagation();
@@ -2258,7 +2545,8 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             } else if (event.key === 'Backspace' && !displayedChord) {
               event.preventDefault();
               event.stopPropagation();
-              onNavigate('previous');
+              if (activeChordOffset !== 0) selectChordPosition(session.target.slotIndex, 0);
+              else onNavigate('previous');
             }
           }}
           autoComplete="off"
