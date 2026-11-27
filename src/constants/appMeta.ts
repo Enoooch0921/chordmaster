@@ -95,6 +95,16 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-27',
+        title: 'Score entry and manual review',
+        bullets: [
+          'Mark a song reviewed with the checkbox beside its title. Drag a review question off the sheet to remove it and keep the surrounding performance cues.',
+          'Nudge chords across bars with Option/Alt and the arrow keys. Enter rhythms with numbers, adjust durations with plus or minus, and opt in to hearing jianpu notes as you enter them.',
+          'Add common band cues from the text editor. Select measures and press Command+D or Ctrl+D to duplicate the group, with one-step undo.'
+        ]
+      },
+      {
+        version: '0.12.68',
+        date: '2026-11-27',
         title: 'Preserve the clipboard when dragging chords',
         bullets: ['Dragging a chord between bars in Safari now preserves the clipboard. After dropping the chord, press Command+C to copy a bar.']
       },
@@ -1394,6 +1404,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-27',
+        title: '歌譜輸入與人工覆核',
+        bullets: [
+          '在歌名旁勾選「待人工」即可完成人工覆核。將待確認標註拖出譜面即可移除，其他演奏提示會保留。',
+          '和弦可用 Option／Alt 加方向鍵跨小節移拍。節奏可用數字輸入、用加減鍵調整時值，簡譜可選擇輸入時試聽。',
+          '文字頁可直接加入常用樂團提示。選取多個小節後按 ⌘D 或 Ctrl+D 可重複整組，並可一步復原。'
+        ]
+      },
+      {
+        version: '0.12.68',
         date: '2026-11-27',
         title: '跨小節拖曳和弦時保留剪貼簿內容',
         bullets: ['修正 Safari 跨小節拖曳和弦時誤觸「已複製 1 小節的完整小節」的問題。拖曳會保留剪貼簿內容，放手後仍可按 ⌘C 複製小節。']
