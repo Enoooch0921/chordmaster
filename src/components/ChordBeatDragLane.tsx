@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { AnimatePresence, motion } from 'motion/react';
+import { guardDropRelease, outsideSheetPaper, SheetTrashDock } from './SheetTrashDock';
 import { Ban, CornerUpLeft, GripVertical, Trash2 } from 'lucide-react';
 import type { AppLanguage } from '../types';
 import {
@@ -10,8 +10,6 @@ import {
   type ChordBeatOffsetValue
 } from '../lib/chordTimingReview';
 import { chordBeatPositionLabel } from '../utils/chordBeatOffsets';
-import { useUiMotion } from '../hooks/useUiMotion';
-import { floatingActionVariants } from '../lib/uiMotion';
 import './ChordBeatDragLane.css';
 
 export function beatHandle(source: BeatMove, label: string, language: AppLanguage) {
@@ -100,27 +98,6 @@ function focusBeat(cell: HTMLElement, beat: number, offset: number) {
   });
 }
 
-// A cross-bar move can unmount the source handle before Safari dispatches click.
-function guardDropRelease(sheet: HTMLElement, x: number, y: number) {
-  const listeners = new AbortController();
-  const options = { capture: true, signal: listeners.signal };
-  sheet.setAttribute('data-chord-drop-release', '');
-  const clear = () => {
-    sheet.removeAttribute('data-chord-drop-release');
-    listeners.abort();
-    window.clearTimeout(timer);
-  };
-  const timer = window.setTimeout(clear, 450);
-  window.addEventListener('pointerdown', clear, options);
-  window.addEventListener('keydown', clear, options);
-  window.addEventListener('click', event => {
-    if (event.detail && Math.abs(event.clientX - x) <= 2 && Math.abs(event.clientY - y) <= 2) {
-      event.preventDefault();
-      event.stopPropagation();
-    }
-  }, options);
-}
-
 function beaconLeftPercent(beat: number, offset: ChordBeatOffsetValue, beats: number, splitRail: boolean) {
   const inBeat = splitRail ? (offset === 0 ? 0.3 : 0.78) : 0.5;
   return ((beat + inBeat) / Math.max(1, beats)) * 100;
@@ -135,7 +112,6 @@ export default function ChordBeatDragLane({
   onMove,
   transfer
 }: Props) {
-  const uiMotion = useUiMotion();
   const pointer = useRef<Drag | null>(null);
   const frame = useRef(0);
   const hold = useRef(0);
@@ -217,12 +193,7 @@ export default function ChordBeatDragLane({
       return { kind: 'beat', cell, beat, offset, outcome: valid ? 'allow' : 'blocked', splitRail, downbeatShare };
     }
     if (el.closest('[data-chord-sheet]') && !sheet.contains(el)) return { kind: 'idle' };
-    // Use the paper edges, including the gaps between pages. A row gutter or floating editor covering the paper is neutral.
-    const pages = sheet.querySelectorAll('[data-export-page-index]');
-    const first = pages[0]?.getBoundingClientRect(), last = pages[pages.length - 1]?.getBoundingClientRect();
-    if (!first || !last) return { kind: 'idle' };
-    const skirt = 26;
-    return x < first.left - skirt || x >= first.right + skirt || y < first.top - skirt || y >= last.bottom + skirt ? trash() : { kind: 'idle' };
+    return outsideSheetPaper(sheet, x, y, 26) ? trash() : { kind: 'idle' };
   }
 
   function paint() {
@@ -420,26 +391,8 @@ export default function ChordBeatDragLane({
             )}
           </div>
         )}
-        <AnimatePresence custom={uiMotion}>
-          {view && transfer && (
-            <motion.div
-              key="chord-trash-dock"
-              data-chord-trash
-              data-active={view.drop.kind === 'trash'}
-              className="chord-trash-dock"
-              data-preview-edit-ui
-              role="status"
-              aria-label={language === 'zh' ? '拖入以刪除和弦' : 'Drop to delete chord'}
-              custom={uiMotion}
-              variants={floatingActionVariants}
-              initial={uiMotion.instant ? false : 'hidden'}
-              animate="visible"
-              exit="exit"
-            >
-              <Trash2 size={22} aria-hidden="true" />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <SheetTrashDock visible={Boolean(view && transfer)} active={view?.drop.kind === 'trash'}
+          label={language === 'zh' ? '拖入以刪除和弦' : 'Drop to delete chord'} />
       </>,
       document.body
     )}

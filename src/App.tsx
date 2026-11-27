@@ -8,6 +8,7 @@ import { EMPTY_LIBRARY_FILTERS, libraryFilterCount, libraryKey, matchesLibraryFi
 import { searchItemsWithMatches } from './lib/songSearch';
 import { getSongLibraryMeta } from './lib/songLibraryPresentation';
 import SongTitle from './components/SongTitle';
+import { applySheetReview, type SheetReviewEdit } from './lib/sheetReview';
 import { confirmChordTiming, indexTimingReviews, moveChordToBeat, transferChartChord, type ChartTimingControls } from './lib/chordTimingReview';
 import PersonalChordSheet from './components/PersonalChordSheet';
 import type { PracticeTuning } from './lib/practiceTuning';
@@ -9071,6 +9072,16 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     }
   }, [activePreviewEditSession, applyPreviewEditDraft, handleSetlistSongContentChange, handleSongChange, isSetlistMode]);
 
+  const commitSheetEdit = (next: Song, withUndo: boolean) => {
+    const previousUndo = withUndo ? globalHistory.getUndoEntry() : null;
+    handleActiveEditorSongChange(next);
+    if (!withUndo) return undefined;
+    const entry = activePreviewEditSession ? null : globalHistory.getUndoEntry();
+    const undo = activePreviewEditSession
+      ? () => setPreviewEditSession(session => session?.draftSong === next ? undoPreviewDraft(session) : session)
+      : entry && entry.id !== previousUndo?.id ? () => { void globalHistory.undo(entry.id); } : undefined;
+    return undo ? { label: language === 'zh' ? '撤銷' : 'Undo', run: undo } : undefined;
+  };
   const editChartTiming: ChartTimingControls['onEdit'] = useStableEvent((target, edit) => {
     if (!activeDraftEditorSong || readerAuditionOpen || isPerformanceMode || isHandwriting || practiceOnChart
         || !(isSetlistMode ? canEditSelectedSetlistContent : canEditTeamSongs)) return;
@@ -9083,20 +9094,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         ? moveChordToBeat(bar, edit.beats, edit.source, edit.to, { targetOffset: edit.toOffset }) : bar);
     if (next === current) return;
     const isDelete = edit.kind === 'transfer' && !edit.destination;
-    const previousUndo = isDelete ? globalHistory.getUndoEntry() : null;
-    handleActiveEditorSongChange(next);
-    const buildUndoAction = () => {
-      const entry = activePreviewEditSession ? null : globalHistory.getUndoEntry();
-      const undo = activePreviewEditSession
-        ? () => setPreviewEditSession(session => session?.draftSong === next ? undoPreviewDraft(session) : session)
-        : entry && entry.id !== previousUndo?.id ? () => { void globalHistory.undo(entry.id); } : undefined;
-      return undo ? { label: language === 'zh' ? '撤銷' : 'Undo', run: undo } : undefined;
-    };
+    const undoAction = commitSheetEdit(next, isDelete);
     if (edit.kind === 'review') {
       toast.success(language === 'zh' ? `已確認 ${edit.review.count} 個小節的拍位` : `Confirmed timing for ${edit.review.count} bars`, { id: 'chord-timing-review' });
     } else if (isDelete) {
       toast.success(language === 'zh' ? '已刪除和弦' : 'Chord deleted', {
-        id: 'workspace-history-action', duration: 6500, action: buildUndoAction()
+        id: 'workspace-history-action', duration: 6500, action: undoAction
       });
     }
     if (edit.kind === 'move' && activePreviewEditSession?.target.field === 'chords'
@@ -9133,6 +9136,17 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     return { reviews: indexTimingReviews(activeDraftEditorSong), onEdit: editChartTiming };
   }, [activeDraftEditorSong, readerAuditionOpen, canOpenEditor, isPerformanceMode, isHandwriting, practiceOnChart, isSetlistMode,
     canEditSelectedSetlistContent, canEditTeamSongs, editChartTiming]);
+
+  const editSheetReview = useStableEvent((identity: string, edit: SheetReviewEdit) => {
+    if (!chartTiming || !activeDraftEditorSong || identity !== activePreviewIdentity) return;
+    const next = applySheetReview(activeDraftEditorSong, edit);
+    if (next === activeDraftEditorSong) return;
+    const action = commitSheetEdit(next, true);
+    const message = edit.kind === 'complete'
+      ? (language === 'zh' ? '已完成人工覆核' : 'Song review complete')
+      : (language === 'zh' ? '已刪除待確認標註' : 'Review note removed');
+    toast.success(message, { id: 'workspace-history-action', duration: 6500, action });
+  });
 
   const handlePreviewSectionTitleChange = React.useCallback((title: string) => {
     setPreviewEditSession((current) => {
@@ -10508,6 +10522,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         currentKey={renderedSong.currentKey}
         showWrittenKeyInMetadata={!isSetlistMode}
         timingControls={chartTiming}
+        onReviewEdit={chartTiming ? editSheetReview : undefined}
         onElementClick={canOpenEditor ? handleElementClick : undefined}
         onMetaClick={canOpenEditor ? handleMetaClick : undefined}
         onAddBarClick={canEditTeamSongs && !activePreviewEditSession ? handleAddBarToSection : undefined}
@@ -10524,7 +10539,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         onSectionReorder={canEditTeamSongs ? handlePreviewSectionReorder : undefined}
       /></RecoveryBoundary>
     );
-  }, [chartTiming, practiceOnChart, practiceTuning, authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isLyricsMode, isLyricsReading, handleSongChange, language, song]);
+  }, [chartTiming, editSheetReview, practiceOnChart, practiceTuning, authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isLyricsMode, isLyricsReading, handleSongChange, language, song]);
 
   // Stable dispatchers read the latest committed permissions, selection and handlers.
   const handleLibraryRowAction = useStableEvent((action: SongLibraryAction, id: string) => {
@@ -10689,6 +10704,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
               language={language}
               currentKey={previewSong.currentKey}
               timingControls={isInteractive ? chartTiming : undefined}
+              onReviewEdit={isInteractive && chartTiming ? editSheetReview : undefined}
               onSetlistElementClick={canOpenEditor ? handleSetlistElementClick : undefined}
               onMetaClick={isInteractive && canOpenEditor ? handleMetaClick : undefined}
               onAddBarClick={isInteractive && canEditSelectedSetlistContent && !activePreviewEditSession ? handleAddBarToSection : undefined}
@@ -10709,7 +10725,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         })}
       </div>
     );
-  }, [chartTiming, practiceOnChart, practiceTuning, authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, allowDefaultSetlistSelection, selectedSetlistId, activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlistContent, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
+  }, [chartTiming, editSheetReview, practiceOnChart, practiceTuning, authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, allowDefaultSetlistSelection, selectedSetlistId, activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlistContent, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)

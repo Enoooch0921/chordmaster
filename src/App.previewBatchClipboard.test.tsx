@@ -391,3 +391,24 @@ it('nudges a focused 3& chord onto beat 3 downbeat and 4& across into bar 2 beat
   expect(movedF).toHaveAttribute('data-move-offset', '0');
   expect(bar(1).querySelector('[data-move-chord="Am"]')).toHaveAttribute('data-move-offset', '0.5');
 }, 15000);
+
+it.each(['songs', 'setlists'])('resolves the title and a single review note independently in %s', async mode => {
+  const song = fixture.songs[0];
+  song.title = '手勢測試（手寫版）（待人工）';
+  song.sections[0].bars[0].annotation = '樂隊進。待檢查：何時進副歌？';
+  song.sections[0].bars[1].annotation = '待確認：末拍要延長嗎？';
+  localStorage.setItem('chordmaster.workspace-mode.v1', mode);
+  render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
+  const checkbox = await screen.findByRole('checkbox', { name: /完成人工覆核/ });
+  const note = await within(bar(0)).findByRole('button', { name: '待檢查：何時進副歌？' });
+  fireEvent.keyDown(note, { key: 'Delete' });
+  await waitFor(() => expect(bar(0).querySelector('[data-score-field="annotation"]')).toHaveTextContent(/^樂隊進。$/));
+  expect(checkbox).toBeInTheDocument();
+  expect(bar(1)).toHaveTextContent('待確認：末拍要延長嗎？');
+  fireEvent.click(await screen.findByRole('button', { name: '撤銷' }));
+  expect(await within(bar(0)).findByRole('button', { name: '待檢查：何時進副歌？' })).toBeInTheDocument();
+  fireEvent.click(checkbox);
+  await waitFor(() => expect(screen.queryByRole('checkbox', { name: /完成人工覆核/ })).toBeNull());
+  expect(screen.getByRole('heading', { level: 1, name: /手勢測試（手寫版）$/ })).toBeInTheDocument();
+  expect(bar(0)).toHaveTextContent('待檢查：何時進副歌？');
+}, 15000);

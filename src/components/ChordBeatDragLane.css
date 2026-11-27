@@ -219,3 +219,36 @@
   [data-move-chord]:hover { outline: 1px dashed var(--section-selection-stroke, #285e41); outline-offset: 1px; }
   .timing-review-action:hover { background: #fef3c7; }
 }
+
+.sheet-review-check {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  gap: 5px;
+  margin-inline-start: .65em;
+  min-height: 24px;
+  padding: 2px 7px;
+  border: 1px solid #d9be86;
+  border-radius: 5px;
+  background: #fffbeb;
+  color: #784914;
+  font: 650 12px/1.25 var(--font-sans, system-ui);
+  letter-spacing: normal;
+  cursor: pointer;
+}
+.sheet-review-check input { width: 14px; height: 14px; accent-color: #236e48; cursor: inherit; }
+.sheet-review-check:focus-within, .sheet-review-note:focus-visible { outline: 2px solid #285e41; outline-offset: 2px; }
+.sheet-review-note {
+  position: relative; color: inherit; font: inherit; letter-spacing: inherit; text-align: inherit;
+  touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; cursor: grab;
+}
+.sheet-review-grip { display: inline-block; width: 9px; height: 10px; margin-inline-end: 2px; vertical-align: -.13em; }
+.sheet-review-note::before { content: ""; position: absolute; inset: -5px -2px; }
+.sheet-review-note[data-review-note-lifted] { opacity: .55; cursor: grabbing; }
+.sheet-review-ghost { font-size: 12px; }
+.sheet-review-ghost span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (hover: hover) and (pointer: fine) {
+  .sheet-review-check:hover { background: #fef3c7; }
+  .sheet-review-note:hover { text-decoration: underline dotted; text-underline-offset: 2px; }
+}
+@media print { .sheet-review-check, .sheet-review-grip { display: none; } }

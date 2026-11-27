@@ -29,6 +29,8 @@ import { getSectionBadgeStyle } from '../utils/sectionBadgeStyle';
  */
 
 import React from 'react';
+import SheetReviewNote from './SheetReviewNote';
+import { reviewNoteParts, titleWithoutReviewMarker, type SheetReviewEdit } from '../lib/sheetReview';
 import SongTitle from './SongTitle';
 import { getChartEditedAt } from '../lib/chartRevision';
 import { createPortal } from 'react-dom';
@@ -834,6 +836,7 @@ interface ChordSheetProps {
   /** Read-only measure excerpt; keeps the full song's key, meter and tie context. */
   excerpt?: { sectionIndex: number; barIndex: number };
   timingControls?: ChartTimingControls;
+  onReviewEdit?: (identity: string, edit: SheetReviewEdit) => void;
   onSectionReorder?: (sourceSectionId: string, targetSectionId: string, placement: 'before' | 'after') => void;
 }
 
@@ -1377,7 +1380,8 @@ const ChordBeatGroup: React.FC<{
   </div>
 );
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMapEditor, lastEditedAt, language, currentKey, practiceTuning, transposeFromOriginal = true, showWrittenKeyInMetadata = false, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, readerAudition = false, showPageBadges = true, excerpt, onSectionReorder, timingControls }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMapEditor, lastEditedAt, language, currentKey, practiceTuning, transposeFromOriginal = true, showWrittenKeyInMetadata = false, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, readerAudition = false, showPageBadges = true, excerpt, onSectionReorder, timingControls, onReviewEdit }) => {
+  const pendingTitle = onReviewEdit && previewIdentity ? titleWithoutReviewMarker(song.title) : null;
   const editedAt = lastEditedAt === undefined ? getChartEditedAt(song) : lastEditedAt;
   const phraseCarries = React.useMemo(() => song.sections.map(section => {
     let primary = 0;
@@ -2299,9 +2303,23 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
               <div className={showSongMap ? 'sheet-first-heading relative grid min-w-0 items-center' : 'min-w-0 relative'}>
                 <div className="col-span-full row-start-1 flex items-start gap-3">
                   <AutoShrink className="mb-0 min-w-0 flex-1">
-                    <div {...getMetaAnchorProps('title')} className={onMetaClick ? 'cursor-text' : undefined}>
-                      <h1 className="text-3xl font-bold tracking-tight"><SongTitle title={song.title} number={setlistSongNumber}/></h1>
-                    </div>
+                    <h1 className="text-3xl font-bold tracking-tight">
+                      <span {...getMetaAnchorProps('title')} className={onMetaClick ? 'cursor-text' : undefined}>
+                        <SongTitle title={pendingTitle ?? song.title} number={setlistSongNumber}/>
+                        {pendingTitle && <span data-sheet-print-only className="song-title-subtitle">{song.title.slice(pendingTitle.length)}</span>}
+                      </span>
+                      {pendingTitle && onReviewEdit && previewIdentity && <label className="sheet-review-check print:hidden"
+                        data-preview-edit-ui data-preview-suppress-pan="true">
+                        <input type="checkbox" name="complete-song-review" checked={false}
+                          aria-label={language === 'zh' ? '待人工，勾選以完成人工覆核' : 'Needs review, mark song review complete'}
+                          onChange={event => {
+                            const titleAnchor = event.currentTarget.closest('h1')?.querySelector<HTMLElement>('[data-preview-edit-anchor]');
+                            onReviewEdit(previewIdentity, { kind: 'complete', title: song.title });
+                            titleAnchor?.focus({ preventScroll: true });
+                          }} />
+                        {language === 'zh' ? '待人工' : 'Needs review'}
+                      </label>}
+                    </h1>
                   </AutoShrink>
                   {pageBadge}
                 </div>
@@ -2947,6 +2965,15 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                         : undefined,
                     }));
                     const barLabel = getBarDisplayLabel(bar);
+                    const note = bar?.annotation;
+                    const renderAnnotation = (format: (value: string) => string) => {
+                      if (!note || !onReviewEdit || !previewIdentity || !section?.id || !bar?.id) return format(note ?? '');
+                      const target = { sectionId: section.id, barId: bar.id };
+                      return reviewNoteParts(note).map(part => part.review
+                        ? <SheetReviewNote key={part.start} text={part.text} language={language}
+                            onRemove={() => onReviewEdit(previewIdentity, { kind: 'remove-note', target, note, start: part.start })} />
+                        : format(part.text));
+                    };
                     const leftNavigationText = formatInitialCaps(bar?.leftText?.trim() ?? '');
                     const rightNavigationText = formatInitialCaps(bar?.rightText?.trim() ?? '') || getDefaultRightNavigationText(bar?.rightMarker);
                     const isRightTextOnlyMarker = Boolean(bar?.rightMarker && TEXT_ONLY_NAVIGATION_MARKERS.has(bar.rightMarker));
@@ -3449,7 +3476,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                         {bar && !isClosedCell && (
                           <>
                             {bar.chordKeyUnspecified && <span data-chord-key-unspecified={bar.id} className="absolute -top-[10px] left-1 z-40 rounded bg-amber-50 px-1 text-[8px] font-medium text-amber-800">{language === 'zh' ? '調性未標 · 原譜級數' : 'Key unspecified · source degrees'}</span>}
-                            {bar.chordKeyUnspecified && !bar.chordTimingUnspecified && bar.annotation && <details className="absolute right-1 top-0 z-40 print:hidden" onClick={event=>event.stopPropagation()}><summary aria-label={language==='zh'?'原譜註記':'Source annotation'} className="cursor-pointer list-none text-[8px] text-slate-500">{language==='zh'?'註':'Note'}</summary><div className="fixed bottom-12 left-3 right-3 rounded-lg border border-slate-300 bg-white p-3 text-xs leading-5 text-slate-700 shadow-lg sm:absolute sm:bottom-full sm:left-auto sm:right-0 sm:w-72">{bar.annotation}</div></details>}
+                            {bar.chordKeyUnspecified && !bar.chordTimingUnspecified && bar.annotation && <details className="absolute right-1 top-0 z-40 print:hidden" onClick={event=>event.stopPropagation()}><summary aria-label={language==='zh'?'原譜註記':'Source annotation'} className="cursor-pointer list-none text-[8px] text-slate-500">{language==='zh'?'註':'Note'}</summary><div className="fixed bottom-12 left-3 right-3 rounded-lg border border-slate-300 bg-white p-3 text-xs leading-5 text-slate-700 shadow-lg sm:absolute sm:bottom-full sm:left-auto sm:right-0 sm:w-72">{renderAnnotation(value => value)}</div></details>}
                             {(() => {
                               const showBottomLane = showBottomRhythmLane || hasRiff || labelSharesNotationLane;
 
@@ -3471,7 +3498,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                                   emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'annotation');
                                 }}
                               >
-                                {formatBarAnnotation(bar.annotation)}
+                                {renderAnnotation(formatBarAnnotation)}
                               </div>
                             )}
                             {unisonMarkStyle && (
@@ -3529,7 +3556,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                                     const moveProps = (source: BeatMove) => controls ? beatHandle(source, displayBarChord(source.chord), language) : {};
                                     const sourceNote = bar.annotation && <details className="absolute right-1 top-0 z-40 print:hidden" onClick={event => event.stopPropagation()}>
                                       <summary aria-label={language === 'zh' ? '原譜註記' : 'Source annotation'} className="cursor-pointer list-none text-[9px] text-slate-500">{language === 'zh' ? '註' : 'Note'}</summary>
-                                      <div className="fixed bottom-12 left-3 right-3 whitespace-pre-wrap rounded-lg border border-slate-300 bg-white p-3 text-xs leading-5 text-slate-700 shadow-lg sm:absolute sm:bottom-full sm:left-auto sm:right-0 sm:w-72">{bar.annotation}</div>
+                                      <div className="fixed bottom-12 left-3 right-3 whitespace-pre-wrap rounded-lg border border-slate-300 bg-white p-3 text-xs leading-5 text-slate-700 shadow-lg sm:absolute sm:bottom-full sm:left-auto sm:right-0 sm:w-72">{renderAnnotation(value => value)}</div>
                                     </details>;
                                     const renderPrimaryChords = (orderedChords = primaryBar.chords, untimedPass?: number, bar = primaryBar) => {
                                     if (bar.chordTimingUnspecified) return <div data-untimed-measure-chords={bar.id} className={`flex min-w-0 w-full flex-col gap-3 ${contentLeftInsetClass}`}>
