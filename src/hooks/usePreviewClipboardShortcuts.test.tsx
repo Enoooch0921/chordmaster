@@ -50,6 +50,21 @@ describe('native preview copy and paste events', () => {
     expect(opts.onPaste).toHaveBeenCalledExactlyOnceWith(content, null);
   });
 
+  it.each(['data-chord-lifted', 'data-chord-drop-release'])('leaves the clipboard alone during %s', marker => {
+    const opts = options();
+    renderHook(() => usePreviewClipboardShortcuts(opts));
+    const { container } = render(<div />);
+    container.setAttribute(marker, '');
+    const data = clipboardData();
+    clipboardEvent('copy', data);
+    expect(opts.onCopy).not.toHaveBeenCalled();
+    expect(opts.clipboardRef.current).toBeNull();
+    expect(data.getData('text/plain')).toBe('');
+    container.removeAttribute(marker);
+    clipboardEvent('copy', data);
+    expect(opts.onCopy).toHaveBeenCalledOnce();
+  });
+
   it('never pastes a stale app snapshot after copying unrelated text or another app token', () => {
     const opts = options();
     renderHook(() => usePreviewClipboardShortcuts(opts));

@@ -21,7 +21,7 @@ export function beatHandle(source: BeatMove, label: string, language: AppLanguag
     ? '拖曳或按方向鍵移動和弦，Alt+方向鍵微調半拍，Delete 刪除，Enter 編輯'
     : 'Drag or use arrow keys to move. Alt+arrows nudge half a beat. Delete to remove. Enter to edit.';
   return {
-    role: 'button', tabIndex: 0, 'data-preview-suppress-pan': 'true', 'data-move-chord': source.chord,
+    role: 'button', tabIndex: 0, draggable: false, 'data-preview-suppress-pan': 'true', 'data-move-chord': source.chord,
     'data-move-label': label, 'data-preview-hover-field': 'chords', 'data-move-beat': source.beat, 'data-move-offset': source.offset,
     'aria-label': language === 'zh' ? `${label}，第 ${position} 拍` : `${label}, beat ${position}`,
     'aria-keyshortcuts': 'ArrowLeft ArrowRight Alt+ArrowLeft Alt+ArrowRight Delete', title: help, 'aria-description': help
@@ -98,6 +98,27 @@ function focusBeat(cell: HTMLElement, beat: number, offset: number) {
     if (element === cell) cell.tabIndex = -1;
     element.focus({ preventScroll: true });
   });
+}
+
+// A cross-bar move can unmount the source handle before Safari dispatches click.
+function guardDropRelease(sheet: HTMLElement, x: number, y: number) {
+  const listeners = new AbortController();
+  const options = { capture: true, signal: listeners.signal };
+  sheet.setAttribute('data-chord-drop-release', '');
+  const clear = () => {
+    sheet.removeAttribute('data-chord-drop-release');
+    listeners.abort();
+    window.clearTimeout(timer);
+  };
+  const timer = window.setTimeout(clear, 450);
+  window.addEventListener('pointerdown', clear, options);
+  window.addEventListener('keydown', clear, options);
+  window.addEventListener('click', event => {
+    if (event.detail && Math.abs(event.clientX - x) <= 2 && Math.abs(event.clientY - y) <= 2) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, options);
 }
 
 function beaconLeftPercent(beat: number, offset: ChordBeatOffsetValue, beats: number, splitRail: boolean) {
@@ -333,6 +354,7 @@ export default function ChordBeatDragLane({
       if (!d || d.id !== event.pointerId) return;
       d.x = event.clientX; d.y = event.clientY;
       const drop = d.active ? hit(d, true) : null;
+      if (d.active) guardDropRelease(d.sheet, d.x, d.y);
       cancel();
       if (drop?.kind === 'trash' && d.preview?.kind === 'trash') transfer?.(d.source, null, true);
       if (drop?.kind === 'beat' && drop.outcome === 'allow') {
@@ -340,10 +362,11 @@ export default function ChordBeatDragLane({
         else transfer?.(d.source, targetFor(drop.cell, drop.beat, drop.offset), true);
       }
     }}
+    onDragStart={event => { if (handleAt(event.target)) event.preventDefault(); }}
     onContextMenu={event => { if (pointer.current?.active) { event.preventDefault(); event.stopPropagation(); } }}
     onPointerCancel={cancel} onLostPointerCapture={cancel}
     onClickCapture={event => {
-      if (suppressClick.current) { suppressClick.current = false; event.preventDefault(); event.stopPropagation(); }
+      if (suppressClick.current && event.detail !== 0) { suppressClick.current = false; event.preventDefault(); event.stopPropagation(); }
     }}>
     {children}
     {beatDrop && createPortal(

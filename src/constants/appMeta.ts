@@ -95,6 +95,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-27',
+        title: 'Preserve the clipboard when dragging chords',
+        bullets: ['Dragging a chord between bars in Safari now preserves the clipboard. After dropping the chord, press Command+C to copy a bar.']
+      },
+      {
+        version: '0.12.67',
+        date: '2026-11-27',
         title: 'Drag chords between beats and bars',
         bullets: ['Drag a chord from 3& onto beat 3 or 4, or into another bar. Dropping onto another chord keeps both in place. Drag a chord to the trash to delete it and use Undo to restore it.']
       },
@@ -1388,6 +1394,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-27',
+        title: '跨小節拖曳和弦時保留剪貼簿內容',
+        bullets: ['修正 Safari 跨小節拖曳和弦時誤觸「已複製 1 小節的完整小節」的問題。拖曳會保留剪貼簿內容，放手後仍可按 ⌘C 複製小節。']
+      },
+      {
+        version: '0.12.67',
         date: '2026-11-27',
         title: '和弦拖曳改拍與跨小節移動',
         bullets: ['在譜面抓住 3& 的和弦，往左拖回第 3 拍，或往右拖到第 4 拍。也能跨小節移動。落點已有和弦時，兩顆和弦都保留原位。拖進垃圾桶刪除後可按撤銷。']

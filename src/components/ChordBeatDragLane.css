@@ -1,5 +1,5 @@
 .chord-move-lane { position: relative; width: 100%; min-width: 0; }
-[data-move-chord] { cursor: grab; touch-action: pan-y pinch-zoom; user-select: none; -webkit-touch-callout: none; }
+[data-move-chord] { cursor: grab; touch-action: pan-y pinch-zoom; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 [data-move-chord]:active { cursor: grabbing; }
 [data-move-chord]:focus-visible, .timing-review-action:focus-visible { outline: 2px solid #285e41; outline-offset: 2px; border-radius: 3px; }
 

@@ -58,6 +58,8 @@ export function usePreviewClipboardShortcuts({ enabled, clipboardRef, onCopy, on
     if (!enabled) return;
     const copy = (event: ClipboardEvent) => {
       if (event.defaultPrevented || shouldKeepNativeClipboard(event) || !event.clipboardData) return;
+      // A browser copy event during pointer drag belongs to the gesture, not the hovered bar.
+      if (document.querySelector('[data-move-chord]:active, [data-chord-lifted], [data-chord-drop-release]')) return;
       const content = onCopy(getHoveredPreviewClipboardTarget());
       if (!content) return;
       const remembered = rememberPreviewClipboard(clipboardRef, content);
