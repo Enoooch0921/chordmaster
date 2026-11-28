@@ -17,6 +17,7 @@ const sectionNames: [string, string, string[]][] = [
   ['Breakdown', 'Bd', []],
   ['Ending', 'E', ['結尾']],
   ['Outro', 'O', ['尾奏']],
+  ['High Praise', 'High Praise', []],
 ];
 const key = (name: string) => name.toLowerCase().replace(/[\s_-]+/g, '');
 const names = new Map(sectionNames.flatMap(([name, code, aliases]) =>

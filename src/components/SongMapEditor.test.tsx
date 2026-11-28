@@ -68,6 +68,33 @@ it('inserts before a selected occurrence, then keeps subsequent inserts in perfo
   fireEvent.click(button('儲存曲序'));
   expect(onSave.mock.calls[0][0].map((s: SongMapStep) => s.label)).toEqual(['Intro','Verse','Pre Chorus 2','Chorus 1','Ending']);
 });
+it.each(['library', 'setlist'] as const)('inserts common cues absent from the %s chart', scope => {
+  const onSave = vi.fn();
+  const sections = [{ label: 'Verse 1', repeats: 1 }, { label: 'Chorus', repeats: 1 }];
+  render(<SongMapEditor steps={sections} title="Song" language="zh" close={vi.fn()}
+    options={{ scope, sections, fallback: sections, onSave }} />);
+
+  const common = within(screen.getByRole('group', { name: '常用段落' }));
+  fireEvent.change(screen.getByLabelText('新增段落位置'), { target: { value: 'before' } });
+  fireEvent.click(common.getByRole('button', { name: '加入 Intro' }));
+  fireEvent.click(common.getByRole('button', { name: '加入 High Praise' }));
+  fireEvent.click(button('儲存曲序'));
+
+  expect(onSave).toHaveBeenCalledWith([
+    { label: 'Intro', repeats: 1 }, { label: 'High Praise', repeats: 1 }, ...sections,
+  ]);
+});
+
+it('lists common labels only once when the chart already has them', () => {
+  const sections = [{ label: '前奏', repeats: 1 }, { label: 'HIGH PRAISE', repeats: 1 }];
+  render(<SongMapEditor steps={sections} title="Song" language="zh" close={vi.fn()}
+    options={{ scope: 'setlist', sections, fallback: sections, onSave: vi.fn() }} />);
+
+  const chart = within(screen.getByRole('group', { name: '歌曲段落' }));
+  expect(chart.getByRole('button', { name: '加入 Intro' })).toBe(button('加入 Intro'));
+  expect(chart.getByRole('button', { name: '加入 High Praise' })).toBe(button('加入 High Praise'));
+});
+
 it('preserves inheritance on reset and undo, while cancellation saves nothing', () => {
   const { onSave, close } = setup();
   fireEvent.click(button('沿用預設曲序'));

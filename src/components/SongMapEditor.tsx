@@ -16,6 +16,7 @@ export interface SongMapEditorOptions {
 }
 type Row = { id: number; label: string; repeats: string };
 type Draft = { rows: Row[]; selected?: number; inherited: boolean };
+const commonSections = ['Intro', 'Turnaround', 'Interlude', 'Instrumental', 'Tag', 'Ending', 'Outro', 'High Praise'];
 const makeRow = (step: SongMapStep, id: number): Row => ({ id, label: step.label, repeats: String(step.repeats) });
 const blockFamily = (label: string) => {
   const name = songMapLabel(label).name;
@@ -108,6 +109,11 @@ export default function SongMapEditor({ steps, options, language, title, close }
   }, []);
   const { rows } = draft, selectedIndex = rows.findIndex(r => r.id === draft.selected), selected = rows[selectedIndex];
   const choices = [...new Set([...(options.sections ?? options.fallback), ...options.fallback, ...steps].flatMap(s => expandSongMapSectionLabel(s.label)))];
+  const commonChoices = choices.length ? commonSections.filter(label => !choices.includes(label)) : songMapSuggestions;
+  const sectionGroups = [
+    { id: `${listId}-chart`, heading: zh ? '歌曲段落' : 'Song sections', labels: choices },
+    { id: `${listId}-common`, heading: zh ? '常用段落' : 'Common sections', labels: commonChoices },
+  ];
   const suggestions = [...new Set([...choices, ...rows.map(r => r.label), ...songMapSuggestions])];
   const valid = rows.length > 0 && rows.every(r => r.label.trim() && Number.isSafeInteger(Number(r.repeats)) && Number(r.repeats) > 0);
   const commit = (next: Draft) => { setHistory(h => [...h.slice(-49), draft]); setDraft(next); };
@@ -302,12 +308,20 @@ export default function SongMapEditor({ steps, options, language, title, close }
             <option value="after">{zh ? `第 ${selectedIndex + 1} 段之後` : `After section ${selectedIndex + 1}`}</option></>}
         </select>
       </div>
-      <div className="map-section-picker" aria-label={zh ? '可加入的段落' : 'Available sections'}>
-        {(choices.length ? choices : songMapSuggestions).map(label => <button key={label} type="button" title={label}
-          aria-label={zh ? `加入 ${label}` : `Add ${label}`} onClick={() => add(label)}>
-          <strong>{songMapDisplayParts(label).code}</strong><span className="map-picker-name">{label}</span>
-        </button>)}
-      </div>
+      {sectionGroups.map(({ id, heading, labels }) => labels.length > 0 && (
+        <div key={id} role="group" aria-labelledby={id} className="map-picker-group">
+          <h4 id={id}>{heading}</h4>
+          <div className="map-section-picker">
+            {labels.map(label => {
+              const { code } = songMapDisplayParts(label);
+              return <button key={label} type="button" title={label}
+                aria-label={zh ? `加入 ${label}` : `Add ${label}`} onClick={() => add(label)}>
+                <strong>{code}</strong>{code !== label && <span className="map-picker-name">{label}</span>}
+              </button>;
+            })}
+          </div>
+        </div>
+      ))}
       <div className="map-extra-actions">
         <details className="ui-details map-custom-section"><summary>{zh ? '其他／自訂段落' : 'Other / custom section'}<ChevronDown size={14} className="ui-motion-chevron" aria-hidden="true" /></summary>
           <form onSubmit={e => { e.preventDefault(); add(custom); setCustom(''); }}>

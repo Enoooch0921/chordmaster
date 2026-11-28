@@ -95,6 +95,14 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-28',
+        title: 'Common sections in the song map',
+        bullets: [
+          'Insert Intro, High Praise, and other common performance cues at the selected position in the song map.'
+        ]
+      },
+      {
+        version: '0.12.71',
+        date: '2026-11-28',
         title: 'Shared setlist song settings and credits',
         bullets: [
           'Identical writing, composition, and translation credits appear once on the chart.',
@@ -1422,6 +1430,14 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-28',
+        title: '曲序常用段落',
+        bullets: [
+          '曲序編輯器新增「常用段落」，可直接把 Intro、High Praise 等演奏提示插入指定位置。'
+        ]
+      },
+      {
+        version: '0.12.71',
         date: '2026-11-28',
         title: '共享歌單歌曲設定與譜面署名',
         bullets: [
