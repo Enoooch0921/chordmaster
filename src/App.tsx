@@ -115,6 +115,7 @@ import {
   Key,
   AppLanguage,
   JoinedSetlist,
+  SharedSetlistSongSettings,
   JoinedProject,
   Project,
   Setlist,
@@ -4681,6 +4682,37 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       }
     }).catch(error => { toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed); }).finally(release);
   };
+
+  const saveJoinedSetlistSongSettings = useStableEvent(async (listId: string, entryId: string, settings: SharedSetlistSongSettings) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || !canArrangeJoinedSetlist || selectedSetlist?.id !== listId) {
+      throw new Error(language === 'zh' ? '目前無法編輯這份共享歌單。' : 'You cannot edit this shared setlist.');
+    }
+    if (!Object.keys(settings).length) return;
+    const work = joinedHistoryWork.current;
+    const release = beginCloudMutation();
+    const save = work.queue.then(async () => {
+      const songData = await repository.saveSharedSetlistSongSettings(listId, entryId, settings);
+      if (joinedHistoryWork.current === work && cloudRepositoryRef.current === repository) {
+        updateJoinedSetlistSongs(listId, songs => songs.map(entry => entry.id === entryId ? { ...entry, songData } : entry));
+      }
+    });
+    work.queue = save.catch(() => undefined);
+    try {
+      await save;
+    } finally {
+      release();
+    }
+  });
+
+  const saveJoinedSongMetadata = useStableEvent((previous: Song, next: Song) => {
+    if (!selectedSetlist || !selectedSetlistSong) return Promise.resolve();
+    const fields = ['title', 'lyricist', 'composer', 'translator', 'tempo', 'timeSignature',
+      'timeSignatureUnspecified', 'originalKeyUnspecified', 'shuffle', 'groove', 'showSongMap'] as const;
+    const settings = Object.fromEntries(fields.filter(field => previous[field] !== next[field])
+      .map(field => [field, next[field] ?? null]));
+    return saveJoinedSetlistSongSettings(selectedSetlist.id, selectedSetlistSong.id, settings);
+  });
 
   const handleSetlistSongKeyChange = (setlistSongId: string, currentKey: Key, currentCapo: number, newKey: Key) => {
     if (!selectedSetlist) {
@@ -10228,7 +10260,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
   }, [activeDraftEditorSong, activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, activeSectionId, canOpenEditor, clearPendingPreviewSectionAction, commitPreviewEditSession, findPreviewAnchorRect, getPreviewIdentityForCurrentMode, hasFinePointer, lastPreviewNonChordMode, makePreviewTargetAnchorKey, previewEditorDeviceLayout, previewSectionActionTarget, refreshPreviewEditAnchorRect, rememberPreviewNonChordMode, preferredChordInputMode]);
 
   const handleMetaClick = React.useCallback((field: ChordSheetMetaField, meta: ChordSheetElementClickMeta) => {
-    if (!canOpenEditor) {
+    if (!canOpenEditor && !(field === 'metadata' && canArrangeJoinedSetlist)) {
       return;
     }
 
@@ -10283,7 +10315,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       anchorRect,
       previewIdentity
     });
-  }, [canOpenEditor, findPreviewAnchorRect, getPreviewIdentityForCurrentMode, hasFinePointer, previewEditSession]);
+  }, [canArrangeJoinedSetlist, canOpenEditor, findPreviewAnchorRect, getPreviewIdentityForCurrentMode, hasFinePointer, previewEditSession]);
+
+  const openJoinedSongSettings = useStableEvent((meta: ChordSheetElementClickMeta) => handleMetaClick('metadata', meta));
 
   // In setlist mode the preview stacks every song. Clicking a section/chord of a
   // song that isn't the currently focused one should (1) switch the focused
@@ -10723,11 +10757,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
               song={previewSong}
               practiceTuning={isSelected && practiceOnChart ? practiceTuning : null}
               setlistSongNumber={songIndex + 1}
-              songMapEditor={isInteractive && canEditSelectedSetlistContent && activeSetlistEditableSong && !activePreviewEditSession ? {
+              songMapEditor={isInteractive && (canEditSelectedSetlistContent || canArrangeJoinedSetlist) && activeSetlistEditableSong && !activePreviewEditSession ? {
                 scope: 'setlist', setlistName: selectedSetlist?.name, fallback: getSongMap({ songMap: libraryMap, sections: previewSong.sections }), sections: sectionSongMap(previewSong.sections),
-                onSave: setlistSongMap => handleUpdateSetlistSong(item.id, current => ({
-                  ...current, songData: { ...(current.songData ?? activeSetlistEditableSong), setlistSongMap },
-                })),
+                onSave: setlistSongMap => canArrangeJoinedSetlist
+                  ? saveJoinedSetlistSongSettings(item.setlistId, item.id, { setlistSongMap: setlistSongMap ?? null })
+                  : handleUpdateSetlistSong(item.id, current => ({
+                      ...current, songData: { ...(current.songData ?? activeSetlistEditableSong), setlistSongMap },
+                    })),
               } : undefined}
               lastEditedAt={savedChartEditedAt(item.songId, selectedSetlistId ?? undefined, item.id)}
               language={language}
@@ -10736,6 +10772,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
               onReviewEdit={isInteractive && chartTiming ? editSheetReview : undefined}
               onSetlistElementClick={canOpenEditor ? handleSetlistElementClick : undefined}
               onMetaClick={isInteractive && canOpenEditor ? handleMetaClick : undefined}
+              onSongSettings={isInteractive && canArrangeJoinedSetlist ? openJoinedSongSettings : undefined}
               onAddBarClick={isInteractive && canEditSelectedSetlistContent && !activePreviewEditSession ? handleAddBarToSection : undefined}
               onAddSectionAfterClick={isInteractive && canEditSelectedSetlistContent && !activePreviewEditSession ? handleAddSectionAfterPreviewSection : undefined}
               onBarLabelLaneChange={isInteractive && canEditSelectedSetlistContent ? handleBarLabelLaneChange : undefined}
@@ -10754,7 +10791,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         })}
       </div>
     );
-  }, [chartTiming, editSheetReview, practiceOnChart, practiceTuning, authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, allowDefaultSetlistSelection, selectedSetlistId, activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlistContent, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
+  }, [chartTiming, editSheetReview, practiceOnChart, practiceTuning, authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, allowDefaultSetlistSelection, selectedSetlistId, activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canArrangeJoinedSetlist, canEditSelectedSetlistContent, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange, openJoinedSongSettings, saveJoinedSetlistSongSettings]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -14756,7 +14793,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
             })()}
             </AnimatePresence>
             <AnimatePresence initial={false} custom={uiMotion}>
-            {activeEditorSong && previewMetaEditTarget && canOpenEditor && !isLyricsMode && (
+            {activeEditorSong && previewMetaEditTarget && previewMetaEditTarget.previewIdentity === activePreviewIdentity
+                && (canOpenEditor || (isSetlistMode && canArrangeJoinedSetlist && previewMetaEditTarget.field === 'metadata')) && !isLyricsMode && (
               <RecoveryBoundary key={`${activePreviewIdentity ?? 'song'}:${previewMetaEditTarget.field}`} label="編輯器"><React.Suspense fallback={<div role="status" className="p-4">正在載入編輯器…</div>}><PreviewWysiwygEditor
                 key={activePreviewIdentity}
                 song={activeEditorSong}
@@ -14782,6 +14820,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                 ) : undefined}
                 showReferenceFields={!isSetlistMode}
                 onChange={handlePreviewWysiwygEditorChange}
+                saveMetadata={isSetlistMode && canArrangeJoinedSetlist ? saveJoinedSongMetadata : undefined}
                 onKeyChange={(key, mode) => {
                   if (isSetlistMode) {
                     handleSetlistKeyChange(key);
@@ -14796,7 +14835,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                     handleSongChange({ ...song, capo });
                   }
                 }}
-                onClose={() => setPreviewMetaEditTarget(null)}
+                onClose={() => setPreviewMetaEditTarget(current => current?.previewIdentity === activePreviewIdentity ? null : current)}
               /></React.Suspense></RecoveryBoundary>
             )}
             </AnimatePresence>

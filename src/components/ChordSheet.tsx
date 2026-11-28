@@ -803,6 +803,7 @@ const VALUE_ANCHORED_META_FIELDS = new Set<ChordSheetMetaField>(['key', 'perform
 interface ChordSheetProps {
   setlistSongNumber?: number;
   songMapEditor?: SongMapEditorOptions;
+  onSongSettings?: (meta: ChordSheetElementClickMeta) => void;
   song: Song;
   lastEditedAt?: number | null;
   language: AppLanguage;
@@ -1380,7 +1381,7 @@ const ChordBeatGroup: React.FC<{
   </div>
 );
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMapEditor, lastEditedAt, language, currentKey, practiceTuning, transposeFromOriginal = true, showWrittenKeyInMetadata = false, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, readerAudition = false, showPageBadges = true, excerpt, onSectionReorder, timingControls, onReviewEdit }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMapEditor, onSongSettings, lastEditedAt, language, currentKey, practiceTuning, transposeFromOriginal = true, showWrittenKeyInMetadata = false, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, readerAudition = false, showPageBadges = true, excerpt, onSectionReorder, timingControls, onReviewEdit }) => {
   const pendingTitle = onReviewEdit && previewIdentity ? titleWithoutReviewMarker(song.title) : null;
   const editedAt = lastEditedAt === undefined ? getChartEditedAt(song) : lastEditedAt;
   const phraseCarries = React.useMemo(() => song.sections.map(section => {
@@ -1855,15 +1856,16 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
   const getMetaEditAnchorKey = (field: ChordSheetMetaField) => getChordSheetMetaAnchorKey(previewIdentity, field);
   const getMetaValueAnchorKey = (field: ChordSheetMetaField) => `${getMetaEditAnchorKey(field)}|value`;
   const emitMetaClickFromElement = (element: HTMLElement, field: ChordSheetMetaField) => {
-    if (!onMetaClick) return;
     const anchorElement = VALUE_ANCHORED_META_FIELDS.has(field)
       ? element.querySelector<HTMLElement>('[data-preview-edit-anchor]') ?? element
       : element;
     const anchorKey = anchorElement.dataset.previewEditAnchor ?? getMetaEditAnchorKey(field);
-    onMetaClick(field, {
+    const meta = {
       anchorKey,
       anchorRect: getPreviewAnchorRect(anchorElement)
-    });
+    };
+    if (field === 'metadata' && onSongSettings) onSongSettings(meta);
+    else onMetaClick?.(field, meta);
   };
   const emitMetaClick = (event: React.MouseEvent<HTMLElement>, field: ChordSheetMetaField) => {
     emitMetaClickFromElement(event.currentTarget, field);
@@ -2226,8 +2228,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
   const composer = song.composer?.trim();
   const translator = song.translator?.trim();
   const isShuffle = song.shuffle ?? song.groove?.trim().toLowerCase() === 'shuffle';
-  const versionNames = Array.from(new Set([lyricist, composer].filter(Boolean)));
-  const creditLine = [versionNames.join(' ｜ '), translator].filter(Boolean).join(' ｜ ');
+  const creditLine = Array.from(new Set([lyricist, composer, translator].filter(Boolean))).join(' ｜ ');
   const hasCredits = Boolean(creditLine);
 
   // The preview scales and centers this paper. Layout projection or CSS
@@ -2265,7 +2266,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
         );
         const mapHeader = !excerpt && <ChartSongMap key={previewIdentity ?? song.title}
           infoAnchor={pIdx === 0 ? getMetaEditAnchorKey('metadata') : getMetaEditAnchorKey('metadata') + '|page-' + pIdx}
-          onInfo={onMetaClick ? element => emitMetaClickFromElement(element, 'metadata') : undefined}
+          onInfo={onMetaClick || onSongSettings ? element => emitMetaClickFromElement(element, 'metadata') : undefined}
           visible={showSongMap} steps={mapSteps} firstPage={pIdx === 0} inline={inlineMap} editor={songMapEditor} language={language} title={song.title} />;
         // Obvious top-of-page "page x of n" marker, only when the song spans more
         // than one page — a clear performance cue so it's hard to lose your place.

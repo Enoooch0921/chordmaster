@@ -143,6 +143,12 @@ export interface SongMapStep {
   repeats: number;
 }
 
+export type SharedSetlistSongSettings = {
+  [Field in 'title' | 'lyricist' | 'composer' | 'translator' | 'tempo' | 'timeSignature' |
+    'timeSignatureUnspecified' | 'originalKeyUnspecified' | 'shuffle' | 'groove' | 'showSongMap' | 'setlistSongMap']?:
+      NonNullable<Song[Field]> | null;
+};
+
 export interface Song {
   songMap?: SongMapStep[];
   showSongMap?: boolean;

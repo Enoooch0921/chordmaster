@@ -53,6 +53,7 @@ interface PreviewWysiwygEditorProps {
   onJianpuInputAbsoluteChange?: (value: boolean) => void;
   showReferenceFields?: boolean;
   onChange: (song: Song) => void;
+  saveMetadata?: (previous: Song, next: Song) => Promise<void>;
   onKeyChange: (key: Key, mode?: TonalMode) => void;
   onCapoChange: (capo: number) => void;
   onClose: () => void;
@@ -318,6 +319,7 @@ export default function PreviewWysiwygEditor({
   onJianpuInputAbsoluteChange,
   showReferenceFields = true,
   onChange,
+  saveMetadata,
   onKeyChange,
   onCapoChange,
   onClose
@@ -333,6 +335,10 @@ export default function PreviewWysiwygEditor({
   const [translatorDraft, setTranslatorDraft] = React.useState(song.translator ?? '');
   const [tempoDraft, setTempoDraft] = React.useState(formatTempoBpm(song.tempo));
   const [timeDraft, setTimeDraft] = React.useState(song.timeSignature);
+  const [metadataDraft, setMetadataDraft] = React.useState(song);
+  const metadataBase = React.useRef(song);
+  const [savingMetadata, setSavingMetadata] = React.useState(false);
+  const [metadataError, setMetadataError] = React.useState('');
   const usesMetadataPanel = target.field === 'metadata'
     || target.field === 'groove'
     || (deviceLayout !== 'desktop' && target.field !== 'performanceKey');
@@ -430,7 +436,7 @@ export default function PreviewWysiwygEditor({
   const uiMotion = useUiMotion();
   const sheetMotion = useBottomSheetMotion(panelRef, usesMetadataPanel && isTouchLayout, () => finishClose());
 
-  useModalFocus(present && usesMetadataPanel && isTouchLayout && sheetMotion.mounted, panelRef);
+  useModalFocus(present && usesMetadataPanel && (isTouchLayout ? sheetMotion.mounted : Boolean(saveMetadata)), panelRef);
 
   const finishClose = () => {
     if (finishedRef.current) {
@@ -442,8 +448,23 @@ export default function PreviewWysiwygEditor({
   };
 
   const closeWithoutCommit = () => {
+    if (savingMetadata) return;
     if (usesMetadataPanel && isTouchLayout) sheetMotion.dismiss();
     else finishClose();
+  };
+
+  const commitMetadata = async () => {
+    if (!saveMetadata || savingMetadata) return;
+    setSavingMetadata(true);
+    setMetadataError('');
+    try {
+      await saveMetadata(metadataBase.current, metadataDraft);
+      finishClose();
+    } catch (error) {
+      setMetadataError(error instanceof Error ? error.message : (zh ? '無法儲存歌曲資訊。' : 'Could not save song information.'));
+    } finally {
+      setSavingMetadata(false);
+    }
   };
 
   const markCommitted = () => {
@@ -475,7 +496,7 @@ export default function PreviewWysiwygEditor({
 
     window.addEventListener('pointerdown', handlePointerDown);
     return () => window.removeEventListener('pointerdown', handlePointerDown);
-  }, [target.field, usesMetadataPanel]);
+  }, [target.field, usesMetadataPanel, savingMetadata]);
 
   const commitTitle = () => {
     if (!markCommitted()) {
@@ -602,6 +623,7 @@ export default function PreviewWysiwygEditor({
       role={fullMetadata ? 'dialog' : undefined}
       aria-modal={fullMetadata && isTouchLayout ? true : undefined}
       aria-label={fullMetadata ? title : undefined}
+      aria-busy={savingMetadata || undefined}
       style={{
         ...(fullMetadata ? { maxHeight: 'inherit' } : {}),
         ...(!isTouchLayout && fullMetadata ? { transformOrigin: '100% 0%' } : {}),
@@ -627,19 +649,28 @@ export default function PreviewWysiwygEditor({
         <button
           type="button"
           onClick={closeWithoutCommit}
+          disabled={savingMetadata}
           className={`${fullMetadata && deviceLayout === 'phone' ? 'h-11 min-w-16 rounded-full bg-indigo-700 px-4 text-white shadow-sm hover:bg-indigo-800' : isTouchLayout ? 'h-11 min-w-11 rounded-lg px-3 text-gray-500 hover:bg-gray-100' : 'h-8 w-8 rounded-lg text-gray-500 hover:bg-gray-100'} inline-flex shrink-0 items-center justify-center transition-colors`}
-          title={zh ? '關閉' : 'Close'}
+          aria-label={saveMetadata ? copy.cancel : fullMetadata && isTouchLayout ? undefined : zh ? '關閉' : 'Close'}
+          title={saveMetadata ? copy.cancel : zh ? '關閉' : 'Close'}
         >
           {fullMetadata && isTouchLayout ? (
-            <span className={`text-sm font-bold ${deviceLayout === 'phone' ? '' : 'text-indigo-600'}`}>{zh ? '完成' : 'Done'}</span>
+            <span className={`text-sm font-bold ${deviceLayout === 'phone' ? '' : 'text-indigo-600'}`}>{saveMetadata ? copy.cancel : zh ? '完成' : 'Done'}</span>
           ) : (
-            <X size={16} />
+            <X size={16} aria-hidden="true" />
           )}
         </button>
       </div>
-      <div data-preview-metadata-scroll={fullMetadata ? '' : undefined} className={`${fullMetadata ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain' : ''} ${fullMetadata && deviceLayout === 'phone' ? 'bg-[color:var(--color-surface)] px-5 pb-5' : 'space-y-3 p-4'}`}>
+      <div data-preview-metadata-scroll={fullMetadata ? '' : undefined} inert={savingMetadata || undefined} className={`${fullMetadata ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain' : ''} ${fullMetadata && deviceLayout === 'phone' ? 'bg-[color:var(--color-surface)] px-5 pb-5' : 'space-y-3 p-4'}`}>
         {children}
       </div>
+      {saveMetadata && <div className="flex shrink-0 items-center justify-end gap-3 border-t border-gray-100 px-4 py-3">
+        {metadataError && <p role="alert" className="min-w-0 break-words text-sm text-red-700">{metadataError}</p>}
+        <button type="button" disabled={savingMetadata} onClick={() => void commitMetadata()}
+          className="min-h-11 shrink-0 rounded-lg bg-indigo-700 px-4 text-sm font-semibold text-white hover:bg-indigo-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-60">
+          {savingMetadata ? (zh ? '儲存中…' : 'Saving…') : (zh ? '儲存歌曲資訊' : 'Save song information')}
+        </button>
+      </div>}
     </motion.div>
   );
 
@@ -942,9 +973,9 @@ export default function PreviewWysiwygEditor({
   const usesFullSongInfoPanel = target.field === 'metadata' && showReferenceFields;
   const renderMetadataPanel = () => chrome(
     <SongMetadataPanel
-      song={song}
+      song={saveMetadata ? metadataDraft : song}
       language={language}
-      onChange={onChange}
+      onChange={saveMetadata ? setMetadataDraft : onChange}
       metadataSuggestions={metadataSuggestions}
       title={usesFullSongInfoPanel ? copy.editor.editSong : undefined}
       keyValue={editableMetadataKey}

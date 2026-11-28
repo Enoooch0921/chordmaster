@@ -11,6 +11,14 @@ const source: Song = { title: 'Joy (What The World Calls Foolish)', originalKey:
   timeSignature: '4/4', songMap: [{ label: 'Bridge', repeats: 4 }], lyricist: 'Martin Smith', composer: 'Version',
   sections: [{ id: 'verse', title: 'Verse', bars: Array.from({ length: 44 }, (_, i) => ({ id: 'bar' + i, chords: ['C'] })) }] };
 
+it('lists each visible credit once even when it is stored in several roles', () => {
+  const song = { ...source, lyricist: '讚美之泉', composer: '作曲者', translator: ' 讚美之泉 ' };
+  const { container, rerender } = render(<ChordSheet song={song} currentKey="C" language="zh" />);
+  expect(container.querySelector('[title="讚美之泉 ｜ 作曲者"]')).toBeInTheDocument();
+  rerender(<ChordSheet song={{ ...song, composer: '讚美之泉' }} currentKey="C" language="zh" />);
+  expect(container.querySelector('[title="讚美之泉"]')).toHaveTextContent('讚美之泉');
+});
+
 it.each(['default', 'preview-header'] as const)('saves visibility through the %s song-info entry and restores the arrangement', variant => {
   function Test() {
     const [song, setSong] = useState(source);

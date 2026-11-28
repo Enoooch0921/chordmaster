@@ -12,7 +12,7 @@ export interface SongMapEditorOptions {
   fallback: SongMapStep[];
   sections?: SongMapStep[];
   setlistName?: string;
-  onSave: (steps: SongMapStep[] | undefined) => void;
+  onSave: (steps: SongMapStep[] | undefined) => void | Promise<void>;
 }
 type Row = { id: number; label: string; repeats: string };
 type Draft = { rows: Row[]; selected?: number; inherited: boolean };
@@ -31,6 +31,8 @@ export default function SongMapEditor({ steps, options, language, title, close }
   const [custom, setCustom] = useState('');
   const [insert, setInsert] = useState<'end' | 'before' | 'after'>('end');
   const [message, setMessage] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [renaming, setRenaming] = useState(false);
   const [dragging, setDragging] = useState<number>();
   const [drop, setDrop] = useState<{ id: number; after: boolean }>();
@@ -223,10 +225,27 @@ export default function SongMapEditor({ steps, options, language, title, close }
     if (current?.active) finishDrag({ pointerId: current.pointer }, cancel);
   }
   const resetLabel = options.scope === 'setlist' ? (zh ? '沿用預設曲序' : 'Use default map') : (zh ? '依譜面產生' : 'Use chart sections');
+  const save = async () => {
+    setSaveError('');
+    try {
+      const result = options.onSave(draft.inherited ? undefined : rows.map(row => ({
+        label: songMapLabel(row.label).name, repeats: Number(row.repeats),
+      })));
+      if (result) {
+        setSaving(true);
+        await result;
+      }
+      close();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : (zh ? '無法儲存曲序。' : 'Could not save the song map.'));
+    } finally {
+      setSaving(false);
+    }
+  };
   return <ResponsiveDialog wide subtitleBelow title={options.scope === 'library' ? (zh ? '預設曲序' : 'Default song map') : (zh ? '本場曲序' : 'Service song map')}
-    subtitle={[options.setlistName, title].filter(Boolean).join(' · ')} closeLabel={zh ? '取消' : 'Cancel'} onClose={close}>
+    subtitle={[options.setlistName, title].filter(Boolean).join(' · ')} closeLabel={zh ? '取消' : 'Cancel'} busy={saving} onClose={close}>
     <div ref={previewLayer} className="map-drag-layer" aria-hidden="true" inert />
-    <div ref={body} className="map-editor-body">
+    <div ref={body} className="map-editor-body" inert={saving || undefined}>
       <div className="map-editor-heading map-sequence-heading"><h3>{zh ? '演奏順序' : 'Performance order'}</h3>
         <div className="map-editor-small-actions">
           <span>{zh ? '按住積木拖動' : 'Hold a block to move'}</span>
@@ -299,9 +318,10 @@ export default function SongMapEditor({ steps, options, language, title, close }
         <button className="map-clear" type="button" disabled={!rows.length} onClick={() => { updateRows([], undefined); setInsert('end'); setMessage(zh ? '已清空，可按復原恢復' : 'Cleared; use Undo to restore'); }}>{zh ? '清空重排' : 'Clear'}</button>
       </div>
     </div>
+    {saveError && <p role="alert" className="px-4 text-sm text-red-700">{saveError}</p>}
     <footer className="map-editor-footer">
-      <button type="button" onClick={() => { const next = options.fallback.map(s => makeRow(s, sequence.current++)); commit({ rows: next, selected: next[0]?.id, inherited: true }); setInsert('end'); }}>{resetLabel}</button>
-      <button type="button" className="map-editor-save" disabled={!draft.inherited && !valid} onClick={() => { options.onSave(draft.inherited ? undefined : rows.map(r => ({ label: songMapLabel(r.label).name, repeats: Number(r.repeats) }))); close(); }}>{zh ? '儲存曲序' : 'Save map'}</button>
+      <button type="button" disabled={saving} onClick={() => { const next = options.fallback.map(s => makeRow(s, sequence.current++)); commit({ rows: next, selected: next[0]?.id, inherited: true }); setInsert('end'); }}>{resetLabel}</button>
+      <button type="button" className="map-editor-save" disabled={saving || (!draft.inherited && !valid)} onClick={() => void save()}>{saving ? (zh ? '儲存中…' : 'Saving…') : (zh ? '儲存曲序' : 'Save map')}</button>
     </footer>
   </ResponsiveDialog>;
 }

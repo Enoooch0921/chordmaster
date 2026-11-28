@@ -7,7 +7,7 @@ import { getNavigationStorageKey, loadNavigationLocation, saveNavigationLocation
 import type { LibraryRole, WorkspaceSnapshot } from './types';
 
 const state = vi.hoisted(() => ({ kind: 'personal', role: 'owner' as LibraryRole,
-  reorder: vi.fn(), setRole: vi.fn(), setKey: vi.fn(), create: vi.fn(), saveSong: vi.fn(), saveSetlist: vi.fn(), saveProject: vi.fn(), status: vi.fn() }));
+  reorder: vi.fn(), setRole: vi.fn(), setKey: vi.fn(), saveSettings: vi.fn(), create: vi.fn(), saveSong: vi.fn(), saveSetlist: vi.fn(), saveProject: vi.fn(), status: vi.fn() }));
 let fixture: WorkspaceSnapshot;
 vi.mock('./lib/auth', () => ({ useSupabaseAuth: () => ({ user: { id: 'user', email: 'test@example.invalid', name: 'Test' },
   session: { access_token: 'test' }, status: 'authenticated', isConfigured: true, signInWithGoogle: vi.fn(), signOut: vi.fn() }) }));
@@ -18,6 +18,7 @@ vi.mock('./lib/repository', () => ({ createCloudRepository: () => ({
   createShareLink: state.create, saveSong: state.saveSong, saveSetlist: state.saveSetlist, saveProject: state.saveProject,
   loadJoinedWorkspace: async () => fixture, applyWorkspaceHistory: state.reorder,
   setSetlistMemberRole: state.setRole, setProjectSetlistSongKey: state.setKey,
+  saveSharedSetlistSongSettings: state.saveSettings,
   getSetlistShareStatus: state.status, getProjectShareStatus: async () => ({ activeToken: null, activeCreatedAt: null, participantCount: 0, participants: [] }),
   getSetlistEditorAssignments: async () => ({ members: [], assignments: [] }),
   getNotifications: async () => [], getShareContacts: async () => [], getPendingTeamInvites: async () => [], subscribeToLibraryChanges: () => () => {}
@@ -171,10 +172,48 @@ it.each(['viewer', 'manager'] as const)('uses the direct %s role for the shared 
     await waitFor(() => expect(state.setKey).toHaveBeenCalledWith('first-entry', 'D'));
     await screen.findByRole('button', { name: 'Key D' });
   } else expect(key).toBeDisabled();
+  expect(Boolean(screen.queryByRole('combobox', { name: '歌曲設定' }))).toBe(role === 'manager');
   fireEvent.click(screen.getByRole('button', { name: '歌單操作' }));
   await screen.findByRole('menuitem', { name: '退出' });
   expect(Boolean(screen.queryByRole('menuitem', { name: '調整歌曲順序' }))).toBe(role === 'manager');
   expect(screen.queryByRole('menuitem', { name: '刪除' })).toBeNull();
+});
+
+it('saves a joined manager’s song map and metadata through the shared entry only', async () => {
+  const [list] = fixture.setlists;
+  const source = fixture.songs[0];
+  fixture = { ...fixture, setlists: [], projects: [], joinedSetlists: [{ ...list, isJoined: true, role: 'manager' }] };
+  state.saveSettings.mockResolvedValueOnce({ ...source, setlistSongMap: [{ label: 'Verse', repeats: 2 }] });
+  state.saveSettings.mockRejectedValueOnce(new Error('儲存失敗，請再試一次。'));
+  state.saveSettings.mockResolvedValueOnce({ ...source, setlistSongMap: [{ label: 'Verse', repeats: 2 }], title: '本場歌名' });
+  saveNavigationLocation(navigationKey(), { ...loadNavigationLocation(navigationKey())!, view: 'detail' });
+  const { container } = mount();
+  const settings = await screen.findByRole('combobox', { name: '歌曲設定' });
+  expect(container.querySelector('[data-preview-edit-hit]')).toBeNull();
+  fireEvent.change(settings, { target: { value: 'map' } });
+  const map = await screen.findByRole('dialog', { name: '本場曲序' });
+  fireEvent.click(within(map).getByRole('button', { name: '增加遍數' }));
+  fireEvent.click(within(map).getByRole('button', { name: '儲存曲序' }));
+  await waitFor(() => expect(state.saveSettings).toHaveBeenCalledWith('first', 'first-entry', { setlistSongMap: [{ label: 'Verse', repeats: 2 }] }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '本場曲序' })).toBeNull());
+  expect(await screen.findByRole('img', { name: 'Verse，共 2 遍' })).toBeInTheDocument();
+
+  settings.focus();
+  fireEvent.change(settings, { target: { value: 'info' } });
+  const info = await screen.findByRole('dialog', { name: '歌曲資訊' });
+  await waitFor(() => expect(within(info).getByRole('button', { name: '取消' })).toHaveFocus());
+  const title = within(info).getByDisplayValue('測試歌曲');
+  fireEvent.change(title, { target: { value: '本場歌名' } });
+  fireEvent.click(within(info).getByRole('button', { name: '儲存歌曲資訊' }));
+  expect(await within(info).findByRole('alert')).toHaveTextContent('儲存失敗，請再試一次。');
+  expect(title).toHaveValue('本場歌名');
+  fireEvent.click(within(info).getByRole('button', { name: '儲存歌曲資訊' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '歌曲資訊' })).toBeNull());
+  await waitFor(() => expect(settings).toHaveFocus());
+  expect(state.saveSettings).toHaveBeenLastCalledWith('first', 'first-entry', { title: '本場歌名' });
+  expect(await screen.findAllByText('本場歌名')).not.toHaveLength(0);
+  expect(state.saveSong).not.toHaveBeenCalled();
+  expect(state.saveSetlist).not.toHaveBeenCalled();
 });
 
 

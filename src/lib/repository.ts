@@ -15,6 +15,7 @@ import {
   SetlistEditorAssignmentSnapshot,
   SetlistShareStatus,
   SetlistSong,
+  SharedSetlistSongSettings,
   SharedResourcePayload,
   SharedSongImportInspection,
   SharedSongImportResult,
@@ -348,6 +349,7 @@ export interface WorkspaceRepository {
   setProjectMemberRole(projectId: string, userId: string, role: SharedMemberRole): Promise<void>;
   removeSharedMember(resourceType: ShareResourceType, resourceId: string, userId: string): Promise<void>;
   setProjectSetlistSongKey(setlistSongId: string, key: string | null): Promise<void>;
+  saveSharedSetlistSongSettings(setlistId: string, entryId: string, settings: SharedSetlistSongSettings): Promise<Song>;
   reorderProjectSetlist(setlistId: string, songIds: string[]): Promise<void>;
   saveCapoOverride(setlistSongId: string, capo: number | null): Promise<void>;
   getShareContacts(): Promise<ShareContact[]>;
@@ -1031,6 +1033,9 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   },
   async setProjectSetlistSongKey() {
     throw new Error('Please sign in to edit a shared project.');
+  },
+  async saveSharedSetlistSongSettings() {
+    throw new Error('Please sign in to edit a shared setlist.');
   },
   async reorderProjectSetlist() {
     throw new Error('Please sign in to edit a shared project.');
@@ -2605,6 +2610,15 @@ export const createCloudRepository = (params: {
         p_key: key
       });
       if (error) throw error;
+    },
+
+    async saveSharedSetlistSongSettings(setlistId, entryId, settings) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data, error } = await supabase.rpc('save_shared_setlist_song_settings', {
+        p_setlist_id: setlistId, p_entry_id: entryId, p_settings: settings
+      });
+      if (error) throw new Error(error.message);
+      return normalizeSongBars(data as Song);
     },
 
     async reorderProjectSetlist(setlistId, songIds) {

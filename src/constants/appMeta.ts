@@ -95,6 +95,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-28',
+        title: 'Shared setlist song settings and credits',
+        bullets: [
+          'Identical writing, composition, and translation credits appear once on the chart.',
+          'Shared setlist managers can edit the service song map and song information from Song settings.'
+        ]
+      },
+      {
+        version: '0.12.70',
+        date: '2026-11-28',
         title: 'Beat placement and review note actions',
         bullets: [
           'Bars with inferred beat positions show their chords directly. A prompt appears only when the timing needs review.',
@@ -1413,6 +1422,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-28',
+        title: '共享歌單歌曲設定與譜面署名',
+        bullets: [
+          '譜面的相同詞曲與翻譯署名只顯示一次。',
+          '共享歌單管理員可在右上角「歌曲設定」編輯本場曲序與歌曲資訊。'
+        ]
+      },
+      {
+        version: '0.12.70',
         date: '2026-11-28',
         title: '拍位顯示與標註刪除',
         bullets: [
