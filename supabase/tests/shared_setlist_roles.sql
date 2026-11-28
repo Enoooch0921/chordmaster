@@ -35,6 +35,16 @@ insert into public.user_setlist_memberships(user_id,setlist_id) values ('1100000
 set local role authenticated;
 select set_config('request.jwt.claim.sub','11000000-0000-4000-8000-000000000002',true);
 select pg_temp.check_value(public.get_joined_setlists()#>>'{0,role}' = 'viewer','new memberships are viewers');
+insert into public.user_setlist_capo_overrides(user_id,setlist_song_id,capo) values (auth.uid(),'a',2);
+insert into public.user_setlist_capo_overrides(user_id,setlist_song_id,capo) values (auth.uid(),'a',0)
+on conflict (user_id,setlist_song_id) do update set capo=excluded.capo;
+select pg_temp.check_value((select capo from public.user_setlist_capo_overrides where setlist_song_id='a')=0,
+  'a direct viewer can insert and update their own Capo');
+do $$ begin
+  insert into public.user_setlist_capo_overrides(user_id,setlist_song_id,capo) values (auth.uid(),'c',4);
+  raise exception 'Expected Capo insert to be denied for the inaccessible setlist';
+exception when insufficient_privilege then null;
+end $$;
 select pg_temp.check_denied($q$select public.set_project_setlist_song_key('a','G')$q$);
 select pg_temp.check_denied($q$select public.save_shared_setlist_song_settings('direct','a','{"tempo":100}')$q$);
 select pg_temp.check_denied($q$select public.set_setlist_member_role('direct',auth.uid(),'manager')$q$);
@@ -103,6 +113,9 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub','11000000-0000-4000-8000-000000000002',true);
 select pg_temp.check_value(public.get_joined_setlists()#>'{0}' @> '{"id":"direct","archived":true,"role":"manager"}','archived direct list stays visible with its archive flag');
 select pg_temp.check_value(public.get_joined_projects()#>'{0,setlists}' @> '[{"id":"sibling","archived":true}]','archived project list stays visible');
+insert into public.user_setlist_capo_overrides(user_id,setlist_song_id,capo) values (auth.uid(),'c',4);
+select pg_temp.check_value((select capo from public.user_setlist_capo_overrides where setlist_song_id='c')=4,
+  'personal Capo can be saved in an accessible archived project setlist');
 select pg_temp.check_denied($q$select public.save_shared_setlist_song_settings('direct','a','{"tempo":110}')$q$);
 select pg_temp.check_denied($q$select public.set_project_setlist_song_key('a','B')$q$);
 select pg_temp.check_denied($q$select public.reorder_workspace_setlist('direct','["b","a"]','["a","b"]')$q$);
@@ -117,6 +130,14 @@ select public.set_project_member_role('project','11000000-0000-4000-8000-0000000
 select pg_temp.check_value(public.get_project_share_status('project')#>>'{participants,0,role}'='viewer','owner can update role');
 select public.remove_shared_member('project','project','11000000-0000-4000-8000-000000000002');
 select pg_temp.check_value(public.get_project_share_status('project')#>>'{participantCount}'='0','owner can remove project member');
+
+select set_config('request.jwt.claim.sub','11000000-0000-4000-8000-000000000002',true);
+update public.user_setlist_capo_overrides set capo=5 where setlist_song_id='c';
+select pg_temp.check_value((select capo from public.user_setlist_capo_overrides where setlist_song_id='c')=4,
+  'a former member cannot update the saved Capo for a project entry they no longer see');
+delete from public.user_setlist_capo_overrides where setlist_song_id='c';
+select pg_temp.check_value(not exists (select 1 from public.user_setlist_capo_overrides where setlist_song_id='c'),
+  'a former member can delete their own preference');
 
 reset role;
 select set_config('request.jwt.claim.sub','',true);

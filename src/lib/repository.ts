@@ -1332,18 +1332,27 @@ const isJoinedSnapshotPayload = (data: unknown): data is JoinedSnapshotPayload =
   return Array.isArray(value.setlists) && Array.isArray(value.projects) && Array.isArray(value.personalCapos);
 };
 
-const normalizeJoinedSnapshot = (data: JoinedSnapshotPayload): JoinedWorkspace => {
-  const capoById = new Map(data.personalCapos.map(row => [row.setlist_song_id, row.capo]));
+const applyJoinedPersonalCapos = (
+  workspace: JoinedWorkspace,
+  personalCapos: JoinedSnapshotPayload['personalCapos']
+): JoinedWorkspace => {
+  const capoById = new Map(personalCapos.map(row => [row.setlist_song_id, row.capo]));
   const withCapo = <T extends Setlist>(setlist: T): T => ({
     ...setlist, songs: setlist.songs.map(song => ({ ...song, personalCapoOverride: capoById.get(song.id) }))
   });
   return {
-    joinedSetlists: normalizeJoinedSetlistRpcPayload(data.setlists).map(withCapo),
-    joinedProjects: normalizeJoinedProjects(data.projects).map(project => ({
+    joinedSetlists: workspace.joinedSetlists.map(withCapo),
+    joinedProjects: workspace.joinedProjects?.map(project => ({
       ...project, setlists: project.setlists.map(withCapo)
     }))
   };
 };
+
+const normalizeJoinedSnapshot = (data: JoinedSnapshotPayload): JoinedWorkspace =>
+  applyJoinedPersonalCapos({
+    joinedSetlists: normalizeJoinedSetlistRpcPayload(data.setlists),
+    joinedProjects: normalizeJoinedProjects(data.projects)
+  }, data.personalCapos);
 
 const getJoinedSetlists = async (userId: string): Promise<JoinedSetlist[]> => {
   if (!supabase) return [];
@@ -1706,27 +1715,26 @@ export const createCloudRepository = (params: {
     await persistLibraryRow('projects', payload, existingProject);
   };
 
-  const loadJoinedWorkspace = async (): Promise<JoinedWorkspace> => {
+  const loadJoinedWorkspace = async (strict = true): Promise<JoinedWorkspace> => {
     // Background reads must not reload or persist the user's own workspace.
     // A failed project read must not look like revoked membership.
     const [joinedSetlists, joinedProjects] = await Promise.all([
       getJoinedSetlists(params.userId),
-      getJoinedProjects(true)
+      getJoinedProjects(strict)
     ]);
     const songIds = [...new Set([
       ...joinedSetlists.flatMap((setlist) => setlist.songs.map((song) => song.id)),
       ...joinedProjects.flatMap((project) => project.setlists.flatMap((setlist) => setlist.songs.map((song) => song.id)))
     ])];
     if (!supabase || songIds.length === 0) return { joinedSetlists, joinedProjects };
-    const data = await getUserSetlistCapoOverrides(songIds, params.userId);
-    const capoById = new Map(data.map((row) => [row.setlist_song_id, row.capo]));
-    const withPersonalCapo = <T extends Setlist>(setlist: T): T => ({
-      ...setlist, songs: setlist.songs.map((song) => ({ ...song, personalCapoOverride: capoById.get(song.id) }))
-    });
-    return {
-      joinedSetlists: joinedSetlists.map(withPersonalCapo),
-      joinedProjects: joinedProjects.map((project) => ({ ...project, setlists: project.setlists.map(withPersonalCapo) }))
-    };
+    try {
+      return applyJoinedPersonalCapos({ joinedSetlists, joinedProjects }, await getUserSetlistCapoOverrides(songIds, params.userId));
+    } catch (error) {
+      // The initial workspace can remain readable before personal preferences
+      // arrive. A background refresh still reports any failure to its caller.
+      if (strict) throw error;
+      return { joinedSetlists, joinedProjects };
+    }
   };
   // Transport cache is separate from accepted React state. A response ignored
   // during editing remains available for the next poll, even if the server then
@@ -1784,15 +1792,14 @@ export const createCloudRepository = (params: {
     },
     async loadWorkspace() {
       const libraryId = await ensureLibraryId();
-      const [workspace, joinedSetlists, joinedProjects] = await Promise.all([
+      const [workspace, joined] = await Promise.all([
         retryTransientFetch(() => getLibraryWorkspace(libraryId, params.userId)),
-        getJoinedSetlists(params.userId),
-        getJoinedProjects()
+        loadJoinedWorkspace(false)
       ]);
       if (libraryId === cachedLibraryId || !activeLibraryId) {
         await persistPersistentWorkspaceSnapshot(workspace.songs, workspace.setlists, workspace.projects);
       }
-      return { ...workspace, joinedSetlists, joinedProjects };
+      return { ...workspace, ...joined };
     },
 
     async loadLibraryWorkspace(libraryId) {
@@ -1801,11 +1808,9 @@ export const createCloudRepository = (params: {
       // background Realtime/access reads must never redirect later writes.
       const workspace = await retryTransientFetch(() => getLibraryWorkspace(libraryId, params.userId));
       const isPersonal = !knownTeamIds.has(libraryId) && libraryId === await ensurePersonalLibraryId();
-      const [joinedSetlists, joinedProjects] = await Promise.all([
-        isPersonal ? getJoinedSetlists(params.userId) : Promise.resolve([] as JoinedSetlist[]),
-        isPersonal ? getJoinedProjects() : Promise.resolve([] as JoinedProject[])
-      ]);
-      return { ...workspace, joinedSetlists, joinedProjects };
+      return isPersonal
+        ? { ...workspace, ...await loadJoinedWorkspace(false) }
+        : workspace;
     },
 
     async loadLibraryContent(libraryId, signal) {
@@ -2489,13 +2494,12 @@ export const createCloudRepository = (params: {
         await saveSetlistToLibrary(normalizedSetlist, libraryId);
       }
 
-      const [workspace, joinedSetlists, joinedProjects] = await Promise.all([
+      const [workspace, joined] = await Promise.all([
         getLibraryWorkspace(libraryId, params.userId),
-        getJoinedSetlists(params.userId),
-        getJoinedProjects()
+        loadJoinedWorkspace(false)
       ]);
       await persistPersistentWorkspaceSnapshot(workspace.songs, workspace.setlists, workspace.projects);
-      return { ...workspace, joinedSetlists, joinedProjects };
+      return { ...workspace, ...joined };
     },
 
     async createShareLink(resourceType, resourceId) {

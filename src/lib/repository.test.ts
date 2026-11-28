@@ -159,6 +159,32 @@ describe('cloud repository personal workspace imports', () => {
     expect(result.joinedProjects?.[0].setlists[0].songs[0].personalCapoOverride).toBe(0);
   });
 
+  it('includes the saved personal Capo when opening the personal library', async () => {
+    const sharedSetlist = {
+      id: 'shared-1', name: 'Shared', createdAt: 1, updatedAt: 1,
+      songs: [{ id: 'entry-1', songId: 'song-1', songData: makeSong() }]
+    };
+    mocks.rpc.mockImplementation((name: string) => Promise.resolve({ error: null, data:
+      name === 'get_joined_setlists' ? [sharedSetlist] : [{ id: 'project-1', setlists: [sharedSetlist] }]
+    }));
+    const library = makeBuilder({ maybeSingle: vi.fn().mockResolvedValue({
+      data: { id: 'personal-1', owner_user_id: 'user-1', kind: 'personal' }, error: null
+    }) });
+    const capoQuery = makeBuilder({ returns: vi.fn().mockResolvedValue({
+      data: [{ setlist_song_id: 'entry-1', capo: 0 }], error: null
+    }) });
+    mocks.from.mockImplementation((table: string) => {
+      if (table === 'libraries') return library;
+      if (table === 'user_setlist_capo_overrides') return capoQuery;
+      return makeBuilder();
+    });
+    const repository = createRepository();
+    const result = await repository.loadLibraryWorkspace('personal-1');
+    expect(capoQuery.eq).toHaveBeenCalledWith('user_id', 'user-1');
+    expect(result.joinedSetlists[0].songs[0].personalCapoOverride).toBe(0);
+    expect(result.joinedProjects?.[0].setlists[0].songs[0].personalCapoOverride).toBe(0);
+  });
+
   it('preserves server timestamps for shared project setlists instead of resetting them on every read', async () => {
     const createdAt = '2026-10-01T08:00:00.000Z';
     const updatedAt = '2026-10-26T08:00:00.000Z';

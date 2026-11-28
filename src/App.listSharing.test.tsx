@@ -295,8 +295,15 @@ it('reorders a directly joined setlist and undoes it without writing to the pers
   const order = () => [...document.querySelectorAll('[data-setlist-song-id]')].map(el => el.getAttribute('data-setlist-song-id'));
   await waitFor(() => expect(order()).toEqual(['first-entry', 'other-entry']));
   const second = document.querySelector<HTMLElement>('[data-setlist-song-id="other-entry"]')!;
-  fireEvent.keyDown(within(second).getByRole('button', { name: /拖動排序/ }), { key: 'ArrowUp' });
+  const actions = within(second).getByRole('button', { name: /^歌曲操作/ });
+  fireEvent.click(actions);
+  const menu = await screen.findByRole('menu', { name: /^歌曲操作/ });
+  const moveUp = within(menu).getByRole('menuitem', { name: '上移一首' });
+  expect(within(menu).getAllByRole('menuitem')).toEqual([moveUp]);
+  await waitFor(() => expect(moveUp).toHaveFocus());
+  fireEvent.click(moveUp);
   await waitFor(() => expect(order()).toEqual(['other-entry', 'first-entry']));
+  expect(actions).toHaveFocus();
   const undo = screen.getByRole('button', { name: '復原 (Cmd/Ctrl+Z)' });
   await waitFor(() => expect(undo).toBeEnabled());
   fireEvent.click(undo);

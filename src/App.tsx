@@ -89,7 +89,7 @@ import { useBackendConnection } from './hooks/useBackendConnection';
 import { useLibraryWorkspaceRefresh } from './hooks/useLibraryWorkspaceRefresh';
 import { useStableEvent } from './hooks/useStableEvent';
 import { useGuitaristMode } from './hooks/useGuitaristMode';
-import { useSetlistBarRowPreference, useSetlistDisplayModePreference } from './hooks/useSetlistDisplayModePreference';
+import { useSetlistBarNumberPreference, useSetlistBarRowPreference, useSetlistDisplayModePreference } from './hooks/useSetlistDisplayModePreference';
 import { useSongEditingPresence } from './hooks/useSongEditingPresence';
 import { SongEditingNotice } from './components/SongEditingNotice';
 import { writeTeamDraft, removeTeamDraft, restoreTeamDraft } from './lib/teamDrafts';
@@ -323,7 +323,6 @@ const SETLIST_SORT_STORAGE_KEY = 'chordmaster.setlist-sort.v1';
 const CLOUD_SETLIST_SONG_REMOVAL_LIMIT = 50;
 const LIBRARY_SORT_STORAGE_KEY = 'chordmaster.library-sort.v1';
 const WORKSPACE_MODE_STORAGE_KEY = 'chordmaster.workspace-mode.v1';
-const JOINED_SETLIST_DISPLAY_PREFERENCES_STORAGE_KEY = 'chordmaster.joined-setlist-display-preferences.v1';
 const GOOGLE_SESSION_STORAGE_KEY = 'chordmaster.google-session.v1';
 const SIDEBAR_WIDTH_STORAGE_KEY = 'chordmaster.sidebar-width.v1';
 const GOOGLE_IDENTITY_SCRIPT_ID = 'google-identity-services-script';
@@ -499,11 +498,6 @@ interface ExportedSongLibraryPayload {
 
 type WorkspaceMode = 'songs' | 'setlists';
 type SetlistSortMode = 'updated-desc' | 'created-desc' | 'name-asc';
-interface JoinedSetlistDisplayPreference {
-  displayMode?: SetlistDisplayMode;
-  barNumberMode?: BarNumberMode;
-  barRowCount?: 1 | 2 | 3;
-}
 
 const sanitizeFileNamePart = (value: string) => (
   value
@@ -1331,43 +1325,6 @@ const serializeSetlists = (setlists: Setlist[]) =>
   );
 
 
-const loadJoinedSetlistDisplayPreferences = (): Record<string, JoinedSetlistDisplayPreference> => {
-  if (typeof window === 'undefined') {
-    return {};
-  }
-
-  try {
-    const raw = window.localStorage.getItem(JOINED_SETLIST_DISPLAY_PREFERENCES_STORAGE_KEY);
-    if (!raw) return {};
-
-    const parsed = JSON.parse(raw) as Record<string, Partial<JoinedSetlistDisplayPreference>>;
-    if (!parsed || typeof parsed !== 'object') return {};
-
-    return Object.fromEntries(
-      Object.entries(parsed)
-        .map(([setlistId, preference]) => {
-          if (!setlistId || !preference || typeof preference !== 'object') return null;
-
-          const normalized: JoinedSetlistDisplayPreference = {};
-          if (typeof preference.displayMode === 'string' && VALID_SETLIST_DISPLAY_MODES.has(preference.displayMode)) {
-            normalized.displayMode = preference.displayMode as SetlistDisplayMode;
-          }
-          if (typeof preference.barNumberMode === 'string' && VALID_BAR_NUMBER_MODES.has(preference.barNumberMode)) {
-            normalized.barNumberMode = preference.barNumberMode as BarNumberMode;
-          }
-          if (preference.barRowCount === 1 || preference.barRowCount === 2 || preference.barRowCount === 3) {
-            normalized.barRowCount = preference.barRowCount;
-          }
-
-          return [setlistId, normalized] as const;
-        })
-        .filter((entry): entry is readonly [string, JoinedSetlistDisplayPreference] => Boolean(entry))
-    );
-  } catch {
-    return {};
-  }
-};
-
 const rememberPreference = (key: string, value: string) => {
   try { window.localStorage.setItem(key, value); } catch { /* The current view keeps its selection. */ }
 };
@@ -1551,6 +1508,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
   const manualLibrary = useRef(selectedSource && startupCache ? { userId: startupCache.user.id, id: startupCache.library.id } : null);
   const personalSetlistDisplay = useSetlistDisplayModePreference(authenticatedUser?.id);
   const personalSetlistRows = useSetlistBarRowPreference(authenticatedUser?.id);
+  const personalBarNumbers = useSetlistBarNumberPreference(authenticatedUser?.id);
   const [activeBar, setActiveBar] = useState<{ sIdx: number; bIdx: number } | null>(null);
   const [previewMetaEditTarget, setPreviewMetaEditTarget] = useState<PreviewWysiwygTarget | null>(null);
   // Score entry always uses preview editors, including for former opt-out preferences.
@@ -1662,7 +1620,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
   const [multiSelectedSetlistIds, setMultiSelectedSetlistIds] = useState<string[]>([]);
   const [joinedSetlists, setJoinedSetlists] = useState<JoinedSetlist[]>(initialWorkspace.joinedSetlists);
   const [joinedProjects, setJoinedProjects] = useState<JoinedProject[]>(initialWorkspace.joinedProjects ?? []);
-  const [joinedSetlistDisplayPreferences, setJoinedSetlistDisplayPreferences] = useState<Record<string, JoinedSetlistDisplayPreference>>(loadJoinedSetlistDisplayPreferences);
   const [selectedSetlistId, setSelectedSetlistId] = useState<string | null>(initialSetlists.selectedSetlistId);
   const [allowDefaultSetlistSelection, setAllowDefaultSetlistSelection] = useState(true);
   const [selectedSetlistSongId, setSelectedSetlistSongId] = useState<string | null>(initialSetlists.selectedSetlistSongId);
@@ -2439,22 +2396,20 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
   // Cloud setlist capo is a per-account preference, so read-only setlist
   // viewers may still adjust it without mutating the shared setlist.
   const canChangeCurrentCapo = !usingStartupCache && (isSetlistMode || canEditTeamSongs);
-  const joinedSetlistDisplayPreference = isJoinedSetlist && selectedSetlist
-    ? joinedSetlistDisplayPreferences[selectedSetlist.id] ?? {}
-    : {};
+  const joinedSetlistBarNumberMode = isJoinedSetlist && selectedSetlist
+    ? personalBarNumbers.barNumberModes[selectedSetlist.id]
+    : undefined;
   const effectiveSelectedSetlist = React.useMemo(() => (
     selectedSetlist
     ? {
         ...selectedSetlist,
         barRowCount: personalSetlistRows.rowCounts[selectedSetlist.id]
-          ?? joinedSetlistDisplayPreference.barRowCount
           ?? 2,
         displayMode: personalSetlistDisplay.modes[selectedSetlist.id]
-          ?? joinedSetlistDisplayPreference.displayMode
           ?? selectedSetlist.displayMode
       }
     : null
-  ), [selectedSetlist, personalSetlistDisplay.modes, personalSetlistRows.rowCounts, joinedSetlistDisplayPreference.displayMode, joinedSetlistDisplayPreference.barRowCount]);
+  ), [selectedSetlist, personalSetlistDisplay.modes, personalSetlistRows.rowCounts]);
   const pendingLeaveSharedSetlist = pendingLeaveSharedSetlistId
     ? joinedSetlists.find((item) => item.id === pendingLeaveSharedSetlistId)
       ?? allJoinedProjectSetlists.find((item) => item.id === pendingLeaveSharedSetlistId)
@@ -2498,12 +2453,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
           selectedSetlistSourceSong
         ),
         references: selectedSetlistSourceSong.references,
-        ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
-          ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
+        ...(isJoinedSetlist && joinedSetlistBarNumberMode
+          ? { barNumberMode: joinedSetlistBarNumberMode }
           : {}),
       }
     : null
-  ), [selectedSetlistSong, selectedSetlistSourceSong, effectiveSelectedSetlist, activeSetlistEditableSong, setlistCapoResolutionOptions, isJoinedSetlist, joinedSetlistDisplayPreference.barNumberMode, joinedSetlistDisplayPreference.barRowCount]);
+  ), [selectedSetlistSong, selectedSetlistSourceSong, effectiveSelectedSetlist, activeSetlistEditableSong, setlistCapoResolutionOptions, isJoinedSetlist, joinedSetlistBarNumberMode]);
   const activeEditorSong = isSetlistMode
     ? (activeSetlistEditableSong ?? selectedSetlistSourceSong ?? null)
     : activeLibraryEditableSong;
@@ -2568,13 +2523,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
               selectedSetlistSourceSong
             ),
             references: selectedSetlistSourceSong.references,
-            ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
-              ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
+            ...(isJoinedSetlist && joinedSetlistBarNumberMode
+              ? { barNumberMode: joinedSetlistBarNumberMode }
               : {}),
           }
         : activeNavigationPreviewSong)
     : activeDraftEditorSong
-  ), [isSetlistMode, activeDraftEditorSong, selectedSetlistSong, selectedSetlistSourceSong, effectiveSelectedSetlist, setlistCapoResolutionOptions, isJoinedSetlist, joinedSetlistDisplayPreference.barNumberMode, joinedSetlistDisplayPreference.barRowCount, activeNavigationPreviewSong]);
+  ), [isSetlistMode, activeDraftEditorSong, selectedSetlistSong, selectedSetlistSourceSong, effectiveSelectedSetlist, setlistCapoResolutionOptions, isJoinedSetlist, joinedSetlistBarNumberMode, activeNavigationPreviewSong]);
   const activeJianpuPitchContext = React.useMemo(() => (
     activeDraftNavigationPreviewSong
       ? buildJianpuPitchContext(activeDraftNavigationPreviewSong)
@@ -2707,7 +2662,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     { value: 'all', label: copy.editor.barNumbersAll }
   ];
   const currentSetlistDisplayMode = effectiveSelectedSetlist?.displayMode ?? 'chord-movable-key';
-  const currentSetlistBarNumberMode = joinedSetlistDisplayPreference.barNumberMode
+  const currentSetlistBarNumberMode = joinedSetlistBarNumberMode
     ?? activeSetlistPreviewSong?.barNumberMode
     ?? 'none';
   const currentSetlistBarRowCount = effectiveSelectedSetlist?.barRowCount ?? 2;
@@ -5878,20 +5833,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     }));
   };
 
-  const handleJoinedSetlistDisplayPreferenceChange = (setlistId: string, updates: JoinedSetlistDisplayPreference) => {
-    setJoinedSetlistDisplayPreferences((current) => {
-      const next = {
-        ...current,
-        [setlistId]: {
-          ...(current[setlistId] ?? {}),
-          ...updates
-        }
-      };
-      rememberPreference(JOINED_SETLIST_DISPLAY_PREFERENCES_STORAGE_KEY, JSON.stringify(next));
-      return next;
-    });
-  };
-
   const handleSetlistDisplayModeChange = (mode: SetlistDisplayMode) => {
     if (!selectedSetlist) {
       return;
@@ -7640,8 +7581,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                 );
                 const derivedSong = {
                   ...baseDerivedSong,
-                  ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
-                    ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
+                  ...(isJoinedSetlist && joinedSetlistBarNumberMode
+                    ? { barNumberMode: joinedSetlistBarNumberMode }
                     : {}),
                 };
                 return (
@@ -10671,8 +10612,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
           sourceSong
         ),
         references: sourceSong.references,
-        ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
-          ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
+        ...(isJoinedSetlist && joinedSetlistBarNumberMode
+          ? { barNumberMode: joinedSetlistBarNumberMode }
           : {}),
       };
 
@@ -10684,8 +10625,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
   }, [
     effectiveSelectedSetlist,
     isJoinedSetlist,
-    joinedSetlistDisplayPreference.barNumberMode,
-    joinedSetlistDisplayPreference.barRowCount,
+    joinedSetlistBarNumberMode,
     setlistCapoResolutionOptions,
     setlistEditableSongs,
     setlistSongsWithSource
@@ -11705,7 +11645,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
           song={isJoinedSetlist
             ? {
                 ...(activeDraftEditorSong ?? activeSetlistEditableSong ?? selectedSetlistSourceSong),
-                barNumberMode: joinedSetlistDisplayPreference.barNumberMode
+                barNumberMode: joinedSetlistBarNumberMode
                   ?? activeSetlistPreviewSong?.barNumberMode
                   ?? (activeDraftEditorSong ?? activeSetlistEditableSong ?? selectedSetlistSourceSong).barNumberMode
                   ?? 'none',
@@ -11722,9 +11662,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
               return;
             }
             if (isJoinedSetlist) {
-              handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, {
-                barNumberMode: nextSong.barNumberMode ?? 'none'
-              });
+              personalBarNumbers.setBarNumberMode(selectedSetlist.id, nextSong.barNumberMode ?? 'none');
               return;
             }
 
@@ -11812,7 +11750,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
             <CompactSegmentedControl
               value={currentSetlistBarNumberMode}
               options={barNumberModeOptions}
-              onChange={(mode) => handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { barNumberMode: mode })}
+              onChange={(mode) => personalBarNumbers.setBarNumberMode(selectedSetlist.id, mode)}
               size="xs"
               stretch
               className="bg-white"
@@ -11846,7 +11784,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
         <CompactSegmentedControl
           value={currentSetlistBarNumberMode}
           options={barNumberModeOptions}
-          onChange={(mode) => handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { barNumberMode: mode })}
+          onChange={(mode) => personalBarNumbers.setBarNumberMode(selectedSetlist.id, mode)}
           size="xs"
           stretch
           className="bg-white"
@@ -12448,7 +12386,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                         <GripVertical size={12} className="setlist-song-number-grip" aria-hidden="true" />
                       </button>
                     ) : <span className="setlist-song-static-number"><span className="setlist-song-number">{index + 1}</span></span>}
-                    {canEditSelectedSetlist && !isSetlistSongSortMode && <SetlistSongActions label={language === 'zh' ? `歌曲操作：${displaySong.title}` : `Song actions: ${displaySong.title}`} removeLabel={copy.removeFromSetlist} onRemove={() => handleRemoveSetlistSongs([item.id])}
+                    {!isSetlistSongSortMode && (canEditSelectedSetlist || (canReorderSelectedSetlist && setlistSongsWithSource.length > 1)) && <SetlistSongActions label={language === 'zh' ? `歌曲操作：${displaySong.title}` : `Song actions: ${displaySong.title}`} removeLabel={copy.removeFromSetlist} onRemove={canEditSelectedSetlist ? () => handleRemoveSetlistSongs([item.id]) : undefined}
                       onMoveUp={canReorderSelectedSetlist && index > 0 ? () => { const prev = setlistSongsWithSource[index - 1]; if (prev) moveSetlistSong(item.id, prev.item.id); } : undefined}
                       onMoveDown={canReorderSelectedSetlist && index < setlistSongsWithSource.length - 1 ? () => { const next = setlistSongsWithSource[index + 1]; if (next) moveSetlistSong(item.id, next.item.id); } : undefined}
                       language={language}

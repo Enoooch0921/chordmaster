@@ -95,6 +95,16 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-28',
+        title: 'Shared song order and personal preferences',
+        bullets: [
+          'Shared setlist managers can move songs up or down from the song row menu and undo the change.',
+          'Shared setlist bar numbers are remembered per account. Saved personal Capo values load when reopening the setlist.',
+          'Personal Capo values can only be saved for songs in a setlist the viewer can access.'
+        ]
+      },
+      {
+        version: '0.12.74',
+        date: '2026-11-28',
         title: 'Shared setlist and project permissions',
         bullets: [
           'Shared setlist managers can edit the service BPM from the song row or toolbar. The entered value stays in the picker if the save fails.',
@@ -1448,6 +1458,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-28',
+        title: '共享歌單排序與個人設定',
+        bullets: [
+          '共享歌單管理員可從歌曲列的選單將歌曲上移或下移，也可復原排序。',
+          '共享歌單的小節編號設定依登入帳號記住。重新開啟歌單時會一起載入個人的 Capo 設定。',
+          '只可為目前有權查看的歌單歌曲儲存個人 Capo。'
+        ]
+      },
+      {
+        version: '0.12.74',
         date: '2026-11-28',
         title: '共享歌單與專案權限',
         bullets: [

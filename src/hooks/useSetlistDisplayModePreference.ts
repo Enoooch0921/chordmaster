@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { SetlistDisplayMode } from '../types';
+import type { BarNumberMode, SetlistDisplayMode } from '../types';
 
 const PREFIX = 'chordmaster.personal-setlist-display-modes.v1';
 const validModes = new Set<SetlistDisplayMode>(['nashville-number-system', 'chord-fixed-key', 'chord-movable-key']);
@@ -46,4 +46,10 @@ const validRows = new Set<1 | 2 | 3>([1, 2, 3]);
 export function useSetlistBarRowPreference(userId: string | null | undefined) {
   const { modes, setMode } = useSetlistPreference(userId, 'chordmaster.personal-setlist-bar-rows.v1', validRows);
   return { rowCounts: modes, setRowCount: setMode };
+}
+
+const validBarNumberModes = new Set<BarNumberMode>(['none', 'line-start', 'all']);
+export function useSetlistBarNumberPreference(userId: string | null | undefined) {
+  const { modes, setMode } = useSetlistPreference(userId, 'chordmaster.personal-setlist-bar-numbers.v1', validBarNumberModes);
+  return { barNumberModes: modes, setBarNumberMode: setMode };
 }

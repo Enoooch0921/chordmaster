@@ -1,6 +1,6 @@
 import { AnimatedPopover } from './ui/InteractionMotion';
 import SlidingSelection from './ui/SlidingSelection';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowDown, ArrowUp, MoreHorizontal, Trash2 } from 'lucide-react';
 import { useAnchoredPortalPanel } from './useAnchoredPortalPanel';
@@ -9,7 +9,7 @@ import type { AppLanguage } from '../types';
 interface SetlistSongActionsProps {
   label: string;
   removeLabel: string;
-  onRemove: () => void;
+  onRemove?: () => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
   language?: AppLanguage;
@@ -24,6 +24,7 @@ export default function SetlistSongActions({ label, removeLabel, onRemove, onMov
   const trigger = useRef<HTMLButtonElement>(null), panel = useRef<HTMLDivElement>(null);
   const id = useId();
   const instantExit = useRef(false);
+  const returnFocusAfterMove = useRef(false);
   const close = useCallback((immediate = false) => { instantExit.current = immediate; setOpen(false); }, []);
   const { panelStyle, placement, isPositioned, transformOrigin } = useAnchoredPortalPanel({ isOpen: open, align: 'right', triggerRef: trigger, panelRef: panel, onRequestClose: close });
   useEffect(() => {
@@ -35,10 +36,20 @@ export default function SetlistSongActions({ label, removeLabel, onRemove, onMov
     return () => document.removeEventListener('pointerdown', outside, true);
   }, [close, open]);
   useEffect(() => { if (open && isPositioned) panel.current?.querySelector('button')?.focus({ preventScroll: true }); }, [open, isPositioned]);
+  useLayoutEffect(() => {
+    if (open || !returnFocusAfterMove.current) return;
+    returnFocusAfterMove.current = false;
+    trigger.current?.focus({ preventScroll: true });
+  }, [open]);
+  const runMove = (move: () => void) => {
+    returnFocusAfterMove.current = true;
+    close(true);
+    move();
+  };
   return <>
     <button ref={trigger} type="button" aria-label={label} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined}
       onClick={() => { instantExit.current = false; setOpen(value => !value); }} className="ui-press flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100">
-      <MoreHorizontal size={18} />
+      <MoreHorizontal size={18} aria-hidden="true" />
     </button>
     {hasOpened && createPortal(<AnimatedPopover animateOnMount open={open} ready={isPositioned} instantExit={instantExit.current} origin={transformOrigin} panelRef={panel} id={id} role="menu" aria-label={label} data-placement={placement} style={panelStyle}
       className="w-52 rounded-xl border border-gray-200 bg-white p-1 shadow-lg dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface-raised)]"
@@ -67,17 +78,17 @@ export default function SetlistSongActions({ label, removeLabel, onRemove, onMov
       </div>}
       {(onMoveUp || onMoveDown) && <>
         {onBarRowCountChange && <div role="separator" className="my-1 border-t border-gray-100 dark:border-[color:var(--color-border)]" />}
-        {onMoveUp && <button type="button" role="menuitem" onClick={() => { close(true); onMoveUp(); }} className="ui-press flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50">
-          <ArrowUp size={16} />{language === 'zh' ? '上移一首' : 'Move up'}
+        {onMoveUp && <button type="button" role="menuitem" onClick={() => runMove(onMoveUp)} className="ui-press flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50">
+          <ArrowUp size={16} aria-hidden="true" />{language === 'zh' ? '上移一首' : 'Move up'}
         </button>}
-        {onMoveDown && <button type="button" role="menuitem" onClick={() => { close(true); onMoveDown(); }} className="ui-press flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50">
-          <ArrowDown size={16} />{language === 'zh' ? '下移一首' : 'Move down'}
+        {onMoveDown && <button type="button" role="menuitem" onClick={() => runMove(onMoveDown)} className="ui-press flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50">
+          <ArrowDown size={16} aria-hidden="true" />{language === 'zh' ? '下移一首' : 'Move down'}
         </button>}
       </>}
-      {(onBarRowCountChange || onMoveUp || onMoveDown) && <div role="separator" className="my-1 border-t border-gray-100 dark:border-[color:var(--color-border)]" />}
-      <button type="button" role="menuitem" onClick={() => { close(true); onRemove(); }} className="ui-press flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-950/40">
-        <Trash2 size={16} />{removeLabel}
-      </button>
+      {onRemove && (onBarRowCountChange || onMoveUp || onMoveDown) && <div role="separator" className="my-1 border-t border-gray-100 dark:border-[color:var(--color-border)]" />}
+      {onRemove && <button type="button" role="menuitem" onClick={() => { close(true); onRemove(); }} className="ui-press flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-950/40">
+        <Trash2 size={16} aria-hidden="true" />{removeLabel}
+      </button>}
     </AnimatedPopover>, document.body)}
   </>;
 }

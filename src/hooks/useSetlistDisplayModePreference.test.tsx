@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { useSetlistDisplayModePreference } from './useSetlistDisplayModePreference';
+import { useSetlistBarNumberPreference, useSetlistDisplayModePreference } from './useSetlistDisplayModePreference';
 beforeEach(() => localStorage.clear());
 afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
 it('remembers each account’s own mode without leaking on account switches', () => {
@@ -49,4 +49,22 @@ it('keeps row heights per setlist and account, validates storage, and restores t
   expect(result.current.rowCounts.meeting).toBe(3);
   unmount();
   expect(renderHook(() => useSetlistBarRowPreference('bob')).result.current.rowCounts.meeting).toBe(2);
+});
+
+it('isolates shared setlist bar numbers by account and ignores old device-wide choices', () => {
+  localStorage.setItem('chordmaster.joined-setlist-display-preferences.v1', JSON.stringify({
+    meeting: { barNumberMode: 'all' }
+  }));
+  const { result, rerender } = renderHook(({ user }) => useSetlistBarNumberPreference(user), {
+    initialProps: { user: 'alice' }
+  });
+  expect(result.current.barNumberModes.meeting).toBeUndefined();
+  act(() => result.current.setBarNumberMode('meeting', 'line-start'));
+  rerender({ user: 'bob' });
+  expect(result.current.barNumberModes.meeting).toBeUndefined();
+  act(() => result.current.setBarNumberMode('meeting', 'none'));
+  rerender({ user: 'alice' });
+  expect(result.current.barNumberModes.meeting).toBe('line-start');
+  rerender({ user: 'bob' });
+  expect(result.current.barNumberModes.meeting).toBe('none');
 });
