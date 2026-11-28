@@ -217,6 +217,68 @@ it('saves a joined manager’s song map and metadata through the shared entry on
 });
 
 
+it('saves shared BPM from the song row and toolbar while retaining a failed edit for retry', async () => {
+  const [list] = fixture.setlists;
+  const source = fixture.songs[0];
+  fixture = { ...fixture, setlists: [], projects: [], joinedSetlists: [{ ...list, isJoined: true, role: 'manager' }] };
+  state.saveSettings.mockReset()
+    .mockRejectedValueOnce(new Error('速度儲存失敗'))
+    .mockResolvedValueOnce({ ...source, tempo: 108 })
+    .mockResolvedValueOnce(source);
+  saveNavigationLocation(navigationKey(), { ...loadNavigationLocation(navigationKey())!, view: 'detail' });
+  mount();
+
+  const row = await waitFor(() => {
+    const element = document.querySelector<HTMLElement>('[data-setlist-song-id="first-entry"]');
+    expect(element).toBeInTheDocument();
+    return element!;
+  });
+  fireEvent.click(within(row).getByRole('button', { name: '速度 未設定 BPM' }));
+  const panel = await screen.findByRole('dialog', { name: '調整速度' });
+  const input = within(panel).getByRole('textbox', { name: '速度 BPM' });
+  fireEvent.change(input, { target: { value: '108' } });
+  fireEvent.click(within(panel).getByRole('button', { name: '套用' }));
+  expect(await within(panel).findByRole('alert')).toHaveTextContent('速度儲存失敗');
+  expect(input).toHaveValue('108');
+  expect(input).toHaveFocus();
+  fireEvent.click(within(panel).getByRole('button', { name: '套用' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '調整速度' })).toBeNull());
+  expect(state.saveSettings).toHaveBeenLastCalledWith('first', 'first-entry', { tempo: 108 });
+
+  const bpmControls = await screen.findAllByRole('button', { name: '速度 108 BPM' });
+  expect(bpmControls).toHaveLength(2);
+  expect(within(row).getByRole('button', { name: '速度 108 BPM' })).toHaveFocus();
+  fireEvent.click(bpmControls.find(control => !row.contains(control))!);
+  const toolbarPanel = await screen.findByRole('dialog', { name: '調整速度' });
+  expect(within(toolbarPanel).queryByRole('button', { name: /還原歌曲庫速度|設為歌曲原始速度/ })).toBeNull();
+  fireEvent.change(within(toolbarPanel).getByRole('textbox', { name: '速度 BPM' }), { target: { value: '' } });
+  fireEvent.click(within(toolbarPanel).getByRole('button', { name: '套用' }));
+  await waitFor(() => expect(state.saveSettings).toHaveBeenLastCalledWith('first', 'first-entry', { tempo: null }));
+  await within(row).findByRole('button', { name: '速度 未設定 BPM' });
+  expect(state.saveSong).not.toHaveBeenCalled();
+  expect(state.saveSetlist).not.toHaveBeenCalled();
+});
+
+it.each(['direct', 'project'] as const)('keeps an archived %s shared setlist readable without arrangement controls', async grant => {
+  const archived = { ...fixture.setlists[0], archived: true };
+  const project = fixture.projects[0];
+  fixture = { ...fixture, setlists: [], projects: [],
+    joinedSetlists: grant === 'direct' ? [{ ...archived, isJoined: true, role: 'manager' }] : [],
+    joinedProjects: grant === 'project' ? [{ ...project, isJoined: true, role: 'manager', setlists: [{ ...archived, projectId: project.id }] }] : [],
+  };
+  const filter = grant === 'project' ? { kind: 'shared-project', projectId: project.id } as const : { kind: 'all' } as const;
+  saveNavigationLocation(navigationKey(), { ...loadNavigationLocation(navigationKey())!, filter, parentFilter: filter, view: 'list' });
+  const { container } = mount();
+  fireEvent.click(await screen.findByRole('button', { name: /歌單1.*已歸檔/ }));
+  expect(await screen.findByText('已歸檔，僅供檢視')).toBeInTheDocument();
+  expect(container.querySelector('[data-setlist-preview-song-id="first-entry"] h1')).toHaveTextContent('測試歌曲');
+  expect(screen.queryByRole('combobox', { name: '歌曲設定' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Key C' })).toBeDisabled();
+  for (const bpm of screen.getAllByRole('button', { name: '速度 未設定 BPM' })) expect(bpm).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '歌單操作' }));
+  expect(screen.queryByRole('menuitem', { name: '調整歌曲順序' })).toBeNull();
+});
+
 it('reorders a directly joined setlist and undoes it without writing to the personal library', async () => {
   const [list] = fixture.setlists;
   const secondEntry = { ...list.songs[0], id: 'other-entry', order: 1 };

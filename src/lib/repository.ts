@@ -203,6 +203,7 @@ interface JoinedSetlistRpcSong {
 
 interface JoinedSetlistRpcRow {
   role?: unknown;
+  archived?: unknown;
   id?: unknown;
   name?: unknown;
   displayMode?: unknown;
@@ -561,6 +562,7 @@ const normalizeJoinedSetlistRpcPayload = (payload: unknown): JoinedSetlist[] => 
         id,
         name: typeof setlistRow.name === 'string' && setlistRow.name.trim() ? setlistRow.name : `Shared Setlist ${index + 1}`,
         role: setlistRow.role === 'manager' ? 'manager' : 'viewer',
+        archived: setlistRow.archived === true,
         displayMode: normalizeSetlistDisplayMode(setlistRow.displayMode),
         createdAt: parseRemoteTimestamp(setlistRow.createdAt),
         updatedAt: parseRemoteTimestamp(setlistRow.updatedAt),
@@ -1446,6 +1448,7 @@ const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]>
       updatedAt: new Date(row.updated_at).getTime(),
       songs,
       role: roles.get(row.id),
+      archived: row.archived === true,
       isJoined: true
     };
   });

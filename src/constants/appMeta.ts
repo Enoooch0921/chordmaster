@@ -95,6 +95,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-28',
+        title: 'Shared setlist and project permissions',
+        bullets: [
+          'Shared setlist managers can edit the service BPM from the song row or toolbar. The entered value stays in the picker if the save fails.',
+          'Viewing, changing, and removing project members use the same permissions. Archived shared setlists are marked view only.'
+        ]
+      },
+      {
+        version: '0.12.73',
+        date: '2026-11-28',
         title: 'Key and tempo for chart playback',
         bullets: [
           'Adjust the key in semitones and set the BPM from the chart’s playback settings.',
@@ -1439,6 +1448,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-28',
+        title: '共享歌單與專案權限',
+        bullets: [
+          '共享歌單管理員可從歌曲列或工具列調整本場 BPM。儲存失敗時保留輸入，可直接重試。',
+          '共享專案的查看成員、調整角色與移除成員使用相同權限。已歸檔的共享歌單標示為僅供檢視。'
+        ]
+      },
+      {
+        version: '0.12.73',
         date: '2026-11-28',
         title: '歌譜試聽調性與速度',
         bullets: [

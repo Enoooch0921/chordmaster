@@ -2390,11 +2390,16 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
   const selectedSetlistJoinedProject = selectedSetlistId
     ? joinedProjects.find((jp) => jp.setlists.some((sl) => sl.id === selectedSetlistId)) ?? null
     : null;
-  const canArrangeJoinedSetlist = !usingStartupCache && isJoinedSetlist && (
+  const isArchivedJoinedSetlist = isJoinedSetlist && selectedSetlist.archived === true;
+  const canArrangeJoinedSetlist = !usingStartupCache && isJoinedSetlist && !isArchivedJoinedSetlist && (
     (selectedSetlist as JoinedSetlist).role === 'manager' || selectedSetlistJoinedProject?.role === 'manager'
   );
   const canEditSelectedSetlistKey = canEditSelectedSetlist || canArrangeJoinedSetlist;
+  const canEditSelectedSetlistTempo = canEditSelectedSetlistContent || canArrangeJoinedSetlist;
   const canReorderSelectedSetlist = canEditSelectedSetlist || canArrangeJoinedSetlist;
+  useEffect(() => {
+    if (!canReorderSelectedSetlist) setIsSetlistSongSortMode(false);
+  }, [canReorderSelectedSetlist]);
   const canManageSetlist = (setlist: Pick<Setlist, 'createdBy' | 'assignedToCurrentUser'>) => !usingStartupCache && (!isTeamWorkspace
     || canEditOwnedTeamSetlist(setlist));
   const isMultiSelectMode = multiSelectedSetlistIds.length > 0;
@@ -3868,9 +3873,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
   });
 
   const handleSetlistSongTempoChange = (itemId: string, tempo: number | undefined) => {
-    if (!canEditSelectedSetlistContent) return;
+    if (!canEditSelectedSetlistTempo) return;
     const entry = setlistSongsWithSource.find(({ item }) => item.id === itemId);
     if (!entry) return;
+    if (canArrangeJoinedSetlist) {
+      return saveJoinedSetlistSongSettings(entry.item.setlistId, itemId, { tempo: tempo ?? null });
+    }
     if (activePreviewEditSession?.previewIdentity === itemId) {
       applyPreviewEditDraft({ ...activePreviewEditSession.draftSong, tempo }, { mergeKey: 'tempo' });
       return;
@@ -12253,6 +12261,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                         {joinedProject?.name ?? copy.sharedWithMe}
                       </span>
                       <span>{item.songs.length} {copy.setlistItems}</span>
+                      {item.archived && <span>{copy.archivedSetlistBadge}</span>}
                     </div>
                     {joinedSongSummaries.length > 0 ? (
                       <div className="mt-2 space-y-1 text-xs leading-5 text-gray-600">
@@ -12316,6 +12325,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
             ...(isJoinedSetlist ? [{label:selectedSetlistJoinedProject?copy.leaveProject:copy.leaveSetlist,icon:<LogOut size={16}/>,run:()=>selectedSetlistJoinedProject?requestLeaveSharedProject(selectedSetlistJoinedProject.id):requestLeaveSharedSetlist(selectedSetlist.id),danger:true,disabled:selectedSetlistJoinedProject?leavingSharedProjectId===selectedSetlistJoinedProject.id:leavingSharedSetlistId===selectedSetlist.id}] : [])
           ]}/>}
         </div>
+        {isArchivedJoinedSetlist && <p className="text-xs font-medium text-gray-500">
+          {language === 'zh' ? '已歸檔，僅供檢視' : 'Archived · View only'}
+        </p>}
         {setlistSongSelectionActive ? (
           <div className="setlist-detail-toolbar setlist-song-batch-toolbar" role="group"
             aria-label={language === 'zh' ? '移出選取歌曲' : 'Remove selected songs'}>
@@ -12489,8 +12501,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
                           <TempoPicker
                             value={effectiveTempo}
                             language={language}
-                            disabled={!canEditSelectedSetlistContent}
-                            showOriginalTempo originalTempo={normalizeTempoBpm(sourceSong.tempo)}
+                            disabled={!canEditSelectedSetlistTempo}
+                            showOriginalTempo={!isJoinedSetlist} originalTempo={normalizeTempoBpm(sourceSong.tempo)}
                             onAdoptOriginalTempo={canAdoptOriginalTempo && !sourceSong.archivedAt ? tempo => handleAdoptOriginalTempo(item.id, tempo) : undefined}
                             triggerLabel={<span className="setlist-rail-value"><span className="setlist-rail-label">BPM</span><span className={String(effectiveTempo ?? '').length > 4 ? 'is-precise' : undefined}>{effectiveTempo ?? '—'}</span></span>}
                             scopeText={language === 'zh' ? '一般調整只套用到這份歌單。' : 'Ordinary adjustments apply to this setlist only.'}
@@ -12514,8 +12526,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
     key={activePreviewIdentity}
     value={activeDraftEditorSong?.tempo}
     language={language}
-    disabled={!canOpenEditor}
-    showOriginalTempo={isSetlistMode}
+    disabled={!(isSetlistMode ? canEditSelectedSetlistTempo : canOpenEditor)}
+    showOriginalTempo={isSetlistMode && !isJoinedSetlist}
     originalTempo={isSetlistMode ? normalizeTempoBpm(selectedSetlistSourceSong?.tempo) : undefined}
     onAdoptOriginalTempo={isSetlistMode && selectedSetlistSong && selectedSetlistSourceSong && !selectedSetlistSourceSong.archivedAt && canAdoptOriginalTempo
       ? tempo => handleAdoptOriginalTempo(selectedSetlistSong.id, tempo) : undefined}
@@ -12524,10 +12536,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth,
       : (language === 'zh' ? '調整這首歌曲的原曲速度。' : 'Change the tempo of this library song.')}
     buttonClassName={buttonClassName}
     onChange={tempo => {
+      if (isSetlistMode) {
+        if (selectedSetlistSong) return handleSetlistSongTempoChange(selectedSetlistSong.id, tempo);
+        return;
+      }
       if (!canOpenEditor || !activeDraftEditorSong) return;
-      if (isSetlistMode && selectedSetlistSong) {
-        handleSetlistSongTempoChange(selectedSetlistSong.id, tempo);
-      } else if (activePreviewEditSession) {
+      if (activePreviewEditSession) {
         applyPreviewEditDraft({ ...activePreviewEditSession.draftSong, tempo }, { mergeKey: 'tempo' });
       } else {
         handleSongChange({ ...song, tempo });

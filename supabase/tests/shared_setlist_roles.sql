@@ -86,10 +86,37 @@ select set_config('request.jwt.claim.sub','11000000-0000-4000-8000-000000000002'
 select public.set_project_setlist_song_key('a','D');
 select public.reorder_workspace_setlist('direct','["a","b"]','["b","a"]');
 select pg_temp.check_value(public.save_shared_setlist_song_settings('sibling','c','{"title":"Project arrangement"}') @> '{"title":"Project arrangement","sections":[]}', 'project manager can edit the service settings');
+select pg_temp.check_value(public.can_manage_share_resource('project','project'),'shared project manager can still share invitations');
+select pg_temp.check_denied($q$select public.get_project_share_status('project')$q$);
+select pg_temp.check_denied($q$select public.set_project_member_role('project',auth.uid(),'viewer')$q$);
+select pg_temp.check_denied($q$select public.remove_shared_member('project','project',auth.uid())$q$);
 select set_config('request.jwt.claim.sub','11000000-0000-4000-8000-000000000001',true);
 select pg_temp.check_value(public.get_setlist_share_status('direct')#>>'{participants,0,inheritsProjectManager}'='true','direct viewer also inherits project grant');
 select pg_temp.check_value(not has_function_privilege('anon','public.set_setlist_member_role(text,uuid,text)','execute'),'anonymous role changes unavailable');
 select pg_temp.check_value(not has_function_privilege('anon','public.save_shared_setlist_song_settings(text,text,jsonb)','execute'),'anonymous song settings unavailable');
+
+reset role;
+select set_config('request.jwt.claim.sub','',true);
+update public.setlists set archived=true where id in ('direct','sibling');
+update public.user_setlist_memberships set role='manager' where setlist_id='direct';
+set local role authenticated;
+select set_config('request.jwt.claim.sub','11000000-0000-4000-8000-000000000002',true);
+select pg_temp.check_value(public.get_joined_setlists()#>'{0}' @> '{"id":"direct","archived":true,"role":"manager"}','archived direct list stays visible with its archive flag');
+select pg_temp.check_value(public.get_joined_projects()#>'{0,setlists}' @> '[{"id":"sibling","archived":true}]','archived project list stays visible');
+select pg_temp.check_denied($q$select public.save_shared_setlist_song_settings('direct','a','{"tempo":110}')$q$);
+select pg_temp.check_denied($q$select public.set_project_setlist_song_key('a','B')$q$);
+select pg_temp.check_denied($q$select public.reorder_workspace_setlist('direct','["b","a"]','["a","b"]')$q$);
+select pg_temp.check_denied($q$select public.save_shared_setlist_song_settings('sibling','c','{"tempo":110}')$q$);
+select pg_temp.check_denied($q$select public.set_project_setlist_song_key('c','B')$q$);
+select pg_temp.check_denied($q$select public.reorder_workspace_setlist('sibling','["c"]','["c"]')$q$);
+select pg_temp.check_denied($q$select public.reorder_project_setlist('sibling','["c"]')$q$);
+
+select set_config('request.jwt.claim.sub','11000000-0000-4000-8000-000000000001',true);
+select pg_temp.check_value(public.get_project_share_status('project')#>>'{participantCount}'='1','owner can view project participants');
+select public.set_project_member_role('project','11000000-0000-4000-8000-000000000002','viewer');
+select pg_temp.check_value(public.get_project_share_status('project')#>>'{participants,0,role}'='viewer','owner can update role');
+select public.remove_shared_member('project','project','11000000-0000-4000-8000-000000000002');
+select pg_temp.check_value(public.get_project_share_status('project')#>>'{participantCount}'='0','owner can remove project member');
 
 reset role;
 select set_config('request.jwt.claim.sub','',true);
@@ -110,4 +137,17 @@ select set_config('request.jwt.claim.sub','11000000-0000-4000-8000-000000000002'
 select pg_temp.check_value(public.save_shared_setlist_song_settings('team-list','team-entry','{"title":"Service copy"}') @> '{"title":"Service copy","sections":[]}', 'a team arranger with a separate shared grant can update service settings');
 reset role;
 select pg_temp.check_value((select override_json from public.setlist_songs where id='team-entry') = '{"overrideKey":"C","songData":{"title":"Service copy","sections":[]}}', 'the team trigger preserves the key and removes the patch assertion');
+select pg_temp.check_value(bool_and(
+  has_function_privilege('authenticated', rpc, 'execute')
+  and not has_function_privilege('anon', rpc, 'execute')
+), 'shared arrangement and participant RPCs require authentication')
+from unnest(array[
+  'public.get_joined_setlists()',
+  'public.set_project_setlist_song_key(text,text)',
+  'public.reorder_workspace_setlist(text,jsonb,jsonb)',
+  'public.reorder_project_setlist(text,jsonb)',
+  'public.get_project_share_status(text)',
+  'public.set_project_member_role(text,uuid,text)',
+  'public.remove_shared_member(text,text,uuid)'
+]) rpc;
 rollback;

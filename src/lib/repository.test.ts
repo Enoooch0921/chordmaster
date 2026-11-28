@@ -102,7 +102,7 @@ describe('cloud repository personal workspace imports', () => {
 
   it('reads a conditional workspace in one RPC and preserves the current viewer’s Capo', async () => {
     const version = 'a'.repeat(64);
-    const setlist = { id: 'sl', name: 'Sunday', songs: [{ id: 'entry', songId: 'song', songData: makeSong() }] };
+    const setlist = { id: 'sl', name: 'Sunday', archived: true, songs: [{ id: 'entry', songId: 'song', songData: makeSong() }] };
     mocks.rpc.mockResolvedValue({ error: null, data: { version, unchanged: false, payload: {
       setlists: [{ ...setlist, role: 'manager' }], projects: [{ id: 'p', role: 'manager', setlists: [setlist] }],
       personalCapos: [{ setlist_song_id: 'entry', capo: 0 }]
@@ -110,7 +110,8 @@ describe('cloud repository personal workspace imports', () => {
     const repository = createRepository();
     const result = await repository.loadJoinedWorkspaceUpdate!(null);
     expect(result.version).toBe(version);
-    expect(result.payload?.joinedSetlists[0].role).toBe('manager');
+    expect(result.payload?.joinedSetlists[0]).toMatchObject({ role: 'manager', archived: true });
+    expect(result.payload?.joinedProjects?.[0].setlists[0].archived).toBe(true);
     expect(result.payload?.joinedSetlists[0].songs[0].personalCapoOverride).toBe(0);
     expect(result.payload?.joinedProjects?.[0].setlists[0].songs[0].personalCapoOverride).toBe(0);
     expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('get_joined_workspace_snapshot', { p_known_version: null });
