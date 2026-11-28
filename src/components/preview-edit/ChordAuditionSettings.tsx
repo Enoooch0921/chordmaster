@@ -7,6 +7,7 @@ import { AnimatedPopover } from '../ui/InteractionMotion';
 
 interface Props {
   open?: boolean;
+  hidden?: boolean;
   onOpenChange?: (open: boolean) => void;
   children?: React.ReactNode;
   zh: boolean;
@@ -23,9 +24,10 @@ interface Props {
 
 const firstControl = 'button:enabled, select:enabled, input:enabled:not([type=radio]), input[type=radio]:enabled:checked';
 
-export default function ChordAuditionSettings({ children, open: controlled, onOpenChange, zh, labels, scope, setScope, metronome, setMetronome, melody, setMelody, visualDelayMs, setVisualDelayMs }: Props) {
+export default function ChordAuditionSettings({ children, open: controlled, hidden, onOpenChange, zh, labels, scope, setScope, metronome, setMetronome, melody, setMelody, visualDelayMs, setVisualDelayMs }: Props) {
   const [localOpen, setLocalOpen] = useState(false);
-  const open = controlled ?? localOpen;
+  const open = !hidden && (controlled ?? localOpen);
+  useLayoutEffect(() => { if (hidden) setLocalOpen(false); }, [hidden]);
   const setOpen = onOpenChange ?? setLocalOpen;
   const [hasOpened, setHasOpened] = useState(open);
   if (open && !hasOpened) setHasOpened(true);

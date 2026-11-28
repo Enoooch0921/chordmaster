@@ -18,7 +18,7 @@ import { AnimatedDisclosure } from './ui/InteractionMotion';
 import { useContentSwitchMotion } from '../hooks/useContentSwitchMotion';
 import type { PracticeReaderState } from '../lib/practiceLyrics';
 import PracticeControl from './PracticeControl';
-import type { PracticeTuning } from '../lib/practiceTuning';
+import { usePlaybackTuning, type PlaybackTuning } from '../hooks/usePlaybackTuning';
 import './preview-edit/PreviewKeyboard.css';
 import './SetlistLyricsWorkspace.css';
 
@@ -40,15 +40,17 @@ interface Props extends PersonalNotesOptions {
   practiceSong?: Song;
   chartViewport?: React.RefObject<HTMLDivElement | null>;
   chartControlsHost?: HTMLElement | null;
-  onPracticePlaybackChange?: (tuning: PracticeTuning | null) => void;
+  onPracticePlaybackChange?: (playing: boolean) => void;
+  playbackTuning?: PlaybackTuning;
   chordPlayback?: { stop: () => void } | null;
   readingPositions?: Map<string, ReadingAnchor | 'last'>;
 }
 const PAPER_WIDTH = 794;
 
-export default function SetlistLyricsWorkspace({ title, entries, language, selectedId, onSelectSong, mode, onModeChange, printSettings, onPrintSettingsChange, onSongChange, onExport, practiceSong, chartViewport, chartControlsHost, onPracticePlaybackChange, chordPlayback, preferenceKey = 'local', readingPositions, phoneHandwritingButton, ...notes }: Props) {
+export default function SetlistLyricsWorkspace({ title, entries, language, selectedId, onSelectSong, mode, onModeChange, printSettings, onPrintSettingsChange, onSongChange, onExport, practiceSong, chartViewport, chartControlsHost, onPracticePlaybackChange, playbackTuning, chordPlayback, preferenceKey = 'local', readingPositions, phoneHandwritingButton, ...notes }: Props) {
   const zh = language === 'zh';
   const practiceUser = notes.noteOwner ?? (preferenceKey.startsWith('user:') ? preferenceKey.slice(5) : null);
+  const localPlaybackTuning = usePlaybackTuning(selectedId);
   const [practice, setPractice] = React.useState<PracticeReaderState>();
   const [controlsHost, setControlsHost] = React.useState<HTMLDivElement | null>(null);
   const [feedbackHost, setFeedbackHost] = React.useState<HTMLDivElement | null>(null);
@@ -187,7 +189,7 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
   return <>
     {showPractice && <PracticeControl key={current.id} identity={current.id} song={practiceSong ?? current.song} language={language} userId={practiceUser}
       controlsHost={chartViewport ? chartControlsHost ?? null : controlsHost} feedbackHost={feedbackHost} onReaderChange={setPractice}
-      chartViewport={chartViewport} onPlaybackChange={onPracticePlaybackChange}/>}
+      chartViewport={chartViewport} onPlaybackChange={onPracticePlaybackChange} playbackTuning={playbackTuning ?? localPlaybackTuning}/>}
     {!chartViewport && (isFocused ? createPortal(content, document.body) : content)}
   </>;
 }

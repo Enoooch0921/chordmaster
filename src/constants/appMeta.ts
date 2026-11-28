@@ -95,6 +95,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-28',
+        title: 'Key and tempo for chart playback',
+        bullets: [
+          'Adjust the key in semitones and set the BPM from the chart’s playback settings.',
+          'Chart playback and sing-along share temporary settings for the same song. Stopping or finishing restores the song’s settings.'
+        ]
+      },
+      {
+        version: '0.12.72',
+        date: '2026-11-28',
         title: 'Common sections in the song map',
         bullets: [
           'Insert Intro, High Praise, and other common performance cues at the selected position in the song map.'
@@ -1430,6 +1439,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-28',
+        title: '歌譜試聽調性與速度',
+        bullets: [
+          '在歌譜的試聽設定升降半音、調整 BPM。',
+          '同一首歌的試聽與練唱共用臨時設定。停止或播完後會恢復歌曲設定。'
+        ]
+      },
+      {
+        version: '0.12.72',
         date: '2026-11-28',
         title: '曲序常用段落',
         bullets: [

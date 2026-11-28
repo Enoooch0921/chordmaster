@@ -4,6 +4,9 @@ import { Play, Square } from 'lucide-react';
 import type { AppLanguage, Song } from '../../types';
 import { AuditionPiano } from '../../lib/auditionPiano';
 import { buildChordAudition, type AuditionPlan, type AuditionScope, type AuditionTarget } from '../../lib/chordAudition';
+import { DEFAULT_PRACTICE_TUNING, practiceTempo } from '../../lib/practiceTuning';
+import type { PlaybackTuning } from '../../hooks/usePlaybackTuning';
+import PracticeTuningControls from '../PracticeTuningControls';
 import ChordAuditionSettings from './ChordAuditionSettings';
 
 export interface ChordPlayback { stop: () => void }
@@ -17,6 +20,8 @@ interface Props {
   selectionLabel: string;
   prominent?: boolean;
   editorShortcut?: boolean;
+  playbackTuning?: PlaybackTuning;
+  settingsHidden?: boolean;
   feedbackHost: HTMLElement | null;
   visualDelayMs: number;
   setVisualDelayMs: (ms: number) => void;
@@ -41,7 +46,7 @@ export function issueText(issue: AuditionPlan['issue'], zh: boolean) {
   }
 }
 
-export default function ChordAuditionControl({ language, song, target, identity, scope, setScope, selectionLabel, prominent = false, editorShortcut = false, feedbackHost, visualDelayMs, setVisualDelayMs, metronome, setMetronome, melody, setMelody, onPlaybackChange }: Props) {
+export default function ChordAuditionControl({ language, song, target, identity, scope, setScope, selectionLabel, prominent = false, editorShortcut = false, playbackTuning, settingsHidden, feedbackHost, visualDelayMs, setVisualDelayMs, metronome, setMetronome, melody, setMelody, onPlaybackChange }: Props) {
   const zh = language === 'zh';
   const labels = zh ? { chord: '這個和弦', bar: '這個小節', section: '從這裡到段尾', song: '從這裡到曲尾', map: '按曲序播完整首', practice: '練唱模式' }
     : { chord: 'This Chord', bar: 'This Bar', section: 'To Section End', song: 'To Song End', map: 'Whole Song in Map Order', practice: 'Sing-along practice' };
@@ -58,8 +63,13 @@ export default function ChordAuditionControl({ language, song, target, identity,
   const actionLabel = scope === 'practice' ? (playing ? (zh ? '停止練唱' : 'Stop practice') : (zh ? '開始練唱' : 'Start sing-along practice')) : playing ? (zh ? '停止試聽' : 'Stop audition') : (zh ? `試聽${playTarget}` : `Play ${playTarget}`);
   const [mapPosition, setMapPosition] = useState<{ visit: number; label: string; description: string } | null>(null);
   const [notice, setNotice] = useState('');
+  const [fallbackTempo, setFallbackTempo] = useState(false);
   const [clickUnavailable, setClickUnavailable] = useState(false);
+  const { tuning, setTuning } = playbackTuning ?? {};
+  const fallbackBpm = practiceTempo(undefined, tuning?.tempoRatio ?? 1);
+  const tempoHint = fallbackTempo ? (zh ? `試聽速度 ${fallbackBpm} BPM` : `Preview tempo ${fallbackBpm} BPM`) : '';
   const piano = useRef<AuditionPiano | null>(null);
+  useLayoutEffect(() => { if (tuning) piano.current?.setPracticeTuning(tuning); }, [tuning]);
   useLayoutEffect(() => piano.current?.setMetronomeEnabled(metronome), [metronome]);
   useLayoutEffect(() => piano.current?.setMelodyEnabled(melody), [melody]);
   useLayoutEffect(() => { if (piano.current) piano.current.visualDelayMs = visualDelayMs; }, [visualDelayMs]);
@@ -74,6 +84,7 @@ export default function ChordAuditionControl({ language, song, target, identity,
     run.current++;
     clearTimeout(loading.current);
     setNotice('');
+    setFallbackTempo(false);
     setMapPosition(null);
     setClickUnavailable(false);
     piano.current?.stop();
@@ -101,6 +112,9 @@ export default function ChordAuditionControl({ language, song, target, identity,
     onPlaybackChange({stop});
     return () => onPlaybackChange(null);
   }, [playing, onPlaybackChange, stop]);
+  useLayoutEffect(() => {
+    if (playing && setTuning) return () => setTuning(DEFAULT_PRACTICE_TUNING);
+  }, [playing, setTuning]);
 
   const play = async () => {
     if (playing) { stop(); return; }
@@ -108,14 +122,15 @@ export default function ChordAuditionControl({ language, song, target, identity,
     const plan = buildChordAudition(song, target, scope, melody);
     const problem = issueText(plan.issue, zh);
     if (plan.duration <= 0) { setNotice(problem || issueText({ kind: 'empty' }, zh)); return; }
-    const hints = plan.fallbackTempo ? (zh ? '試聽速度 80 BPM' : 'Preview tempo 80 BPM') : '';
-    setNotice(hints);
+    setFallbackTempo(plan.fallbackTempo);
+    setNotice('');
     setPlaying(true);
     const request = ++run.current;
     loading.current = setTimeout(() => {
       if (run.current === request) setNotice(zh ? '正在載入鋼琴…' : 'Loading piano…');
     }, 220);
     piano.current ??= new AuditionPiano();
+    if (tuning) piano.current.setPracticeTuning(tuning);
     piano.current.visualDelayMs = visualDelayMs;
     piano.current.setMetronomeEnabled(metronome);
     piano.current.setMelodyEnabled(melody);
@@ -153,10 +168,11 @@ export default function ChordAuditionControl({ language, song, target, identity,
     try {
       const result = await piano.current.play(plan, paint, () => {
         if (run.current !== request) return;
-        clearMark(); setPlaying(false); setMapPosition(null); setNotice(problem || hints);
+        clearTimeout(loading.current);
+        clearMark(); setPlaying(false); setMapPosition(null); setNotice(problem);
       }, failed);
       if (run.current === request) {
-        clearTimeout(loading.current); setNotice(hints);
+        clearTimeout(loading.current); setNotice('');
         setClickUnavailable(result?.metronomeUnavailable ?? false);
       }
     } catch { failed(); }
@@ -168,7 +184,7 @@ export default function ChordAuditionControl({ language, song, target, identity,
         aria-keyshortcuts={editorShortcut ? 'Alt+P' : undefined}
         title={editorShortcut ? `${actionLabel} (Alt + P)` : actionLabel}
         aria-label={actionLabel}
-        onMouseDown={event => event.preventDefault()} onClick={event => {
+        onMouseDown={event => { if (editorShortcut) event.preventDefault(); }} onClick={event => {
           if (event.detail > 0) {
             const editor = event.currentTarget.closest('[data-preview-bar-editor]');
             editor?.querySelector<HTMLElement>('[data-preview-chord-capture]')?.focus({ preventScroll: true });
@@ -182,10 +198,12 @@ export default function ChordAuditionControl({ language, song, target, identity,
         </span>
       </button>
       <ChordAuditionSettings visualDelayMs={visualDelayMs} setVisualDelayMs={setVisualDelayMs} zh={zh} labels={labels} scope={scope} setScope={setScope}
-        metronome={metronome} setMetronome={setMetronome} melody={melody} setMelody={setMelody} />
+        metronome={metronome} setMetronome={setMetronome} melody={melody} setMelody={setMelody} hidden={settingsHidden}>
+        {playbackTuning && <PracticeTuningControls song={song} tuning={playbackTuning.tuning} onChange={playbackTuning.setTuning} zh={zh} audition />}
+      </ChordAuditionSettings>
     </div>
-    {feedbackHost && createPortal(<div aria-live="polite" className="chord-audition-notice">{[playing && mapPosition?.description, notice,
-      scope === 'map' && !mapPosition && !notice ? (zh ? '從曲序開頭' : 'From map start') : '',
+    {feedbackHost && createPortal(<div aria-live="polite" className="chord-audition-notice">{[playing && mapPosition?.description, notice || tempoHint,
+      scope === 'map' && !mapPosition && !notice && !tempoHint ? (zh ? '從曲序開頭' : 'From map start') : '',
       metronome && clickUnavailable ? (zh ? '節拍器載入失敗，可再按播放重試。' : 'Metronome unavailable. Play again to retry.') : ''
     ].filter(Boolean).join(' ')}</div>, feedbackHost)}
   </div>;

@@ -10,18 +10,20 @@ import type { PracticeReaderState } from '../lib/practiceLyrics';
 import { isClosedBar } from '../utils/closedBar';
 import { useAuditionPreferences } from '../hooks/useAuditionPreferences';
 import { usePracticeChartCursor } from '../hooks/usePracticeChartCursor';
+import type { PlaybackTuning } from '../hooks/usePlaybackTuning';
 import { issueText } from './preview-edit/ChordAuditionControl';
 import ChordAuditionSettings from './preview-edit/ChordAuditionSettings';
 import PracticeTuningControls from './PracticeTuningControls';
-import { DEFAULT_PRACTICE_TUNING, type PracticeTuning } from '../lib/practiceTuning';
+import { DEFAULT_PRACTICE_TUNING } from '../lib/practiceTuning';
 
 type Session = ReturnType<typeof buildPracticeSession>;
 interface Cursor { bar: AuditionBar; lastBar: AuditionBar; nextLabel?: string }
 interface Cue { label: string; at: number }
 
-export default function PracticeControl({ song, identity, language, userId, controlsHost, feedbackHost, onReaderChange, chartViewport, onPlaybackChange }: {
+export default function PracticeControl({ song, identity, language, userId, controlsHost, feedbackHost, onReaderChange, chartViewport, onPlaybackChange, playbackTuning }: {
   song: Song; language: AppLanguage; userId?: string | null; controlsHost: HTMLElement | null; feedbackHost: HTMLElement | null;
-  identity: string; chartViewport?: React.RefObject<HTMLDivElement | null>; onPlaybackChange?: (tuning: PracticeTuning | null) => void;
+  identity: string; chartViewport?: React.RefObject<HTMLDivElement | null>; onPlaybackChange?: (playing: boolean) => void;
+  playbackTuning: PlaybackTuning;
   onReaderChange: (state: PracticeReaderState | undefined) => void;
 }) {
   const zh = language === 'zh';
@@ -35,14 +37,14 @@ export default function PracticeControl({ song, identity, language, userId, cont
     && all.findIndex(s => s.id === section.id) === i), [song]);
   const [start, setStart] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [tuning, setTuning] = useState(DEFAULT_PRACTICE_TUNING);
+  const { tuning, setTuning } = playbackTuning;
   const paintChart = usePracticeChartCursor(identity, playing ? chartViewport : undefined);
+  useLayoutEffect(() => { if (playing) piano.current?.setPracticeTuning(tuning); }, [playing, tuning]);
   useLayoutEffect(() => {
     if (!playing) return;
-    piano.current?.setPracticeTuning(tuning);
-    onPlaybackChange?.(tuning);
-    return () => onPlaybackChange?.(null);
-  }, [playing, tuning, onPlaybackChange]);
+    onPlaybackChange?.(true);
+    return () => onPlaybackChange?.(false);
+  }, [playing, onPlaybackChange]);
   const [position, setPosition] = useState<Cursor>();
   const [queued, setQueued] = useState<Cue>();
   const [notice, setNotice] = useState('');
@@ -59,9 +61,9 @@ export default function PracticeControl({ song, identity, language, userId, cont
     generation.current++;
     piano.current?.stop();
     pending.current = undefined;
+    if (session.current) setTuning(DEFAULT_PRACTICE_TUNING);
     session.current = undefined;
     paintChart(null);
-    setTuning(DEFAULT_PRACTICE_TUNING);
     setSettingsOpen(false);
     setQueued(undefined); setPosition(undefined); setPlaying(false);
   };
@@ -74,7 +76,7 @@ export default function PracticeControl({ song, identity, language, userId, cont
       window.removeEventListener('pagehide', finish);
       finish(); piano.current?.dispose();
     };
-  }, [song]);
+  }, [song, setTuning]);
   useLayoutEffect(() => {
     if (!piano.current) return;
     piano.current.visualDelayMs = visualDelayMs;

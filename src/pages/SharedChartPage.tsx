@@ -5,6 +5,7 @@ import InvitationPage from '../components/InvitationPage';
 import { useInvitationTransition } from '../components/InvitationTransition';
 import { invitationPath, type InvitationResource } from '../lib/invitationJourney';
 import { useThemeMode } from '../hooks/useThemeMode';
+import { usePlaybackTuning } from '../hooks/usePlaybackTuning';
 import { useParams, useNavigate } from 'react-router-dom';
 import ChordSheet from '../components/ChordSheet';
 import type { ChordPlayback } from '../components/preview-edit/ChordAuditionControl';
@@ -47,17 +48,21 @@ function SharedSongPreview({ song, language, identity, triggerHost, userId, lyri
 }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [chordPlayback, setChordPlayback] = useState<ChordPlayback | null>(null);
+  const [auditionOpen, setAuditionOpen] = useState(false);
+  const playbackTuning = usePlaybackTuning(identity);
+  const { tuning } = playbackTuning;
+  const chartTuning = auditionOpen && (tuning.semitones !== 0 || tuning.tempoRatio !== 1) ? tuning : null;
   const [mode, setMode] = useState<SetlistLyricsMode>('reading');
   const [printSettings, setPrintSettings] = useState(DEFAULT_LYRICS_BOOK_SETTINGS);
   return <>
     {(!lyrics || chordPlayback) && <ReaderAudition userId={userId} song={song} identity={identity} chartRef={chartRef}
       language={language} triggerHost={lyrics ? null : triggerHost} chartVisible={!lyrics} hidePanel={lyrics && mode === 'reading'}
-      onPlaybackChange={setChordPlayback}/>}
+      playbackTuning={playbackTuning} onOpenChange={setAuditionOpen} onPlaybackChange={setChordPlayback}/>}
     {lyrics ? <div style={{ height: '80dvh' }}><SetlistLyricsWorkspace preferenceKey={userId ? `user:${userId}` : 'local'} title={song.title}
-      entries={[{ id: identity, song }]} selectedId={identity} chordPlayback={chordPlayback} onSelectSong={() => {}}
+      entries={[{ id: identity, song }]} selectedId={identity} chordPlayback={chordPlayback} onSelectSong={() => {}} playbackTuning={playbackTuning}
       language={language} mode={mode} onModeChange={setMode} printSettings={printSettings} onPrintSettingsChange={setPrintSettings}/></div>
       : <div ref={chartRef} className="shared-audition-score">
-        <ChordSheet readerAudition song={song} language={language} currentKey={song.currentKey} previewIdentity={identity} />
+        <ChordSheet readerAudition song={song} language={language} currentKey={song.currentKey} previewIdentity={identity} practiceTuning={chartTuning} />
       </div>}
   </>;
 }

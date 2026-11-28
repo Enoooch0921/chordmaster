@@ -275,7 +275,7 @@
   .chord-audition-split:not([data-playing]) button:hover { background: var(--keyboard-pressed); border-radius: 6px; }
 }
 .chord-audition-settings {
-  width: 13.5rem; overflow-y: auto; overscroll-behavior: contain; padding: 6px;
+  width: 13.5rem; max-width: inherit; max-height: inherit; overflow-y: auto; overscroll-behavior: contain; padding: 6px;
   border: 1px solid var(--keyboard-border); border-radius: 12px;
   background: var(--keyboard-header); color: var(--keyboard-text); box-shadow: 0 5px 18px #17372125;
   font-size: 14px; line-height: 1.35;
@@ -292,6 +292,32 @@
 .chord-audition-click-option { margin-top: 4px; border-top: 1px solid var(--keyboard-border); }
 .chord-audition-settings input[type="checkbox"] { width: 18px; height: 18px; flex: none; accent-color: var(--keyboard-active); }
 @media (hover: hover) { .chord-audition-settings label:hover { background: var(--keyboard-utility); } }
+.practice-tuning { display: grid; gap: 8px; padding: 5px 4px 8px; border-bottom: 1px solid var(--keyboard-border); }
+.chord-audition-settings .practice-tuning :is(legend, label) {
+  display: block; min-height: 0; margin: 0 0 4px; padding: 0 2px;
+  font-size: 13px; font-weight: 600; color: var(--keyboard-text); background: transparent;
+}
+.practice-stepper {
+  display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: stretch;
+  border: 1px solid var(--keyboard-border); border-radius: 7px; background: var(--keyboard-key);
+}
+.practice-stepper :is(output, input) {
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  width: 100%; min-width: 0; text-align: center; font-variant-numeric: tabular-nums; font-size: 16px; font-weight: 600;
+}
+.practice-stepper small { color: var(--keyboard-muted); font-size: 12px; }
+.practice-stepper input { appearance: textfield; }
+.practice-stepper input::-webkit-inner-spin-button { appearance: none; }
+.practice-stepper button {
+  display: grid; place-items: center; min-height: 44px;
+  background: var(--keyboard-utility); color: var(--keyboard-text); border-radius: 6px;
+  cursor: pointer; touch-action: manipulation;
+}
+.practice-stepper button:disabled { opacity: .45; cursor: default; }
+.practice-stepper :is(input, button):focus-visible { outline: 2px solid var(--color-focus-ring, var(--keyboard-active)); outline-offset: -3px; }
+.practice-stepper button:enabled:active { background: var(--keyboard-pressed); }
+@media (hover: hover) { .practice-stepper button:enabled:hover { background: var(--keyboard-pressed); } }
+.practice-tuning .practice-hint { margin: 0 2px; font-size: 12px; color: var(--keyboard-muted); }
 .chord-audition-feedback { display: contents; }
 .chord-audition-notice:empty { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .chord-audition-notice:not(:empty) { padding: 5px 10px; font-size: 12px; line-height: 1.4; color: var(--keyboard-text); overflow-wrap: anywhere; }

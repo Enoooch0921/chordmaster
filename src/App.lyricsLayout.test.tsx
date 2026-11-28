@@ -133,6 +133,68 @@ it.each(['written', 'arranged'])('continues one %s practice session at the curre
   expect(JSON.stringify(fixture)).toBe(saved);
 });
 
+it('shares temporary audition tuning with lyrics and applies live edits to the chart and piano', async () => {
+  const song = fixture.songs[0];
+  song.tempo = 96;
+  fixture.setlists[0].songs[0].overrideKey = 'D';
+  song.sections[0].bars.push({ id: 'tempo-change', chords: ['G'], tempo: 120 });
+  const saved = JSON.stringify(fixture);
+  const play = vi.spyOn(AuditionPiano.prototype, 'play').mockResolvedValue({ metronomeUnavailable: false });
+  const retune = vi.spyOn(AuditionPiano.prototype, 'setPracticeTuning');
+  await mountLyrics();
+
+  const toggleMode = () => fireEvent.click(screen.getAllByRole('button', { name: '歌詞模式' })[0]);
+  const openSettings = (name: string) => {
+    const trigger = screen.getByRole('button', { name });
+    vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue(new DOMRect(120, 60, 44, 44));
+    fireEvent.click(trigger);
+  };
+  const raise = () => fireEvent.click(screen.getByRole('button', { name: '升半音' }));
+  const closeSettings = () => fireEvent.keyDown(screen.getByRole('button', { name: '升半音' }), { key: 'Escape' });
+  const chord = () => document.querySelector('[data-audition-chart="entry-one"][data-audition-bar="one-bar"]');
+  const tempoChange = () => document.querySelector('[data-tempo-event="tempo-change"]');
+  const auditionTempo = () => screen.getByRole('spinbutton', { name: '試聽速度 (BPM)' });
+
+  toggleMode();
+  fireEvent.click(screen.getByRole('button', { name: '試聽' }));
+  openSettings('試聽設定');
+  expect(screen.getByLabelText('目前試聽調性')).toHaveTextContent('D');
+  raise();
+  fireEvent.change(auditionTempo(), { target: { value: '72' } });
+  expect(tempoChange()).toHaveTextContent('90');
+  closeSettings();
+  expect(screen.getByRole('button', { name: '試聽設定' })).toHaveFocus();
+
+  toggleMode();
+  openSettings('練唱設定');
+  expect(screen.getByLabelText('目前練唱調性')).toHaveTextContent('Eb');
+  expect(screen.getByRole('spinbutton', { name: '練唱速度 (BPM)' })).toHaveValue(72);
+  closeSettings();
+  toggleMode();
+  fireEvent.click(screen.getByRole('button', { name: '試聽' }));
+  fireEvent.click(screen.getByRole('button', { name: '試聽從這裡到曲尾' }));
+  expect(retune).toHaveBeenLastCalledWith({ semitones: 1, tempoRatio: .75 });
+  openSettings('試聽設定');
+  raise();
+  fireEvent.change(auditionTempo(), { target: { value: '48' } });
+  expect(retune).toHaveBeenLastCalledWith({ semitones: 2, tempoRatio: .5 });
+  expect(chord()).toHaveTextContent('E');
+  expect(tempoChange()).toHaveTextContent('60');
+  closeSettings();
+
+  toggleMode();
+  expect(screen.getByRole('button', { name: '停止和弦播放' })).toBeInTheDocument();
+  toggleMode();
+  expect(screen.getByRole('button', { name: '停止試聽' })).toBeInTheDocument();
+  expect(play).toHaveBeenCalledTimes(1);
+  act(play.mock.calls[0][2]);
+  expect(chord()).toHaveTextContent('D');
+  expect(tempoChange()).toHaveTextContent('120');
+  openSettings('試聽設定');
+  expect(auditionTempo()).toHaveValue(96);
+  expect(JSON.stringify(fixture)).toBe(saved);
+});
+
 it('opens locked reading, navigates songs, and retains both A4 layouts independently of reading size', async () => {
   const original = JSON.stringify(fixture);
   await mountLyrics();

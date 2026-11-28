@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Headphones, ChevronDown, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import type { AppLanguage, Bar, Song } from '../types';
 import { useAuditionPreferences } from '../hooks/useAuditionPreferences';
+import type { PlaybackTuning } from '../hooks/usePlaybackTuning';
 import { getSongTimeSignatureStates } from '../lib/songEditing';
 import { isClosedBar } from '../utils/closedBar';
 import { getChordEvents } from '../utils/chordSubdivisions';
@@ -20,6 +21,7 @@ interface Props {
   triggerHost: HTMLSpanElement | null;
   chartVisible: boolean;
   hidePanel: boolean;
+  playbackTuning: PlaybackTuning;
   onOpenChange?: (open: boolean) => void;
   onPlaybackChange: (playback: ChordPlayback | null) => void;
   chartRef: React.RefObject<HTMLDivElement | null>;
@@ -37,7 +39,7 @@ function auditionPositions(bar: Bar, beats: number) {
   ).flat();
 }
 
-export default function ReaderAudition({ song, identity, language, chartRef, triggerHost, userId, chartVisible, hidePanel, onOpenChange, onPlaybackChange }: Props) {
+export default function ReaderAudition({ song, identity, language, chartRef, triggerHost, userId, chartVisible, hidePanel, playbackTuning, onOpenChange, onPlaybackChange }: Props) {
   const zh = language === 'zh';
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -127,8 +129,8 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
         aria-expanded={open} aria-controls={panelId} aria-label={toggleLabel} onClick={() => open ? close() : setOpen(true)}>
         <Headphones size={16} aria-hidden="true" />{open ? (zh ? '收起' : 'Hide') : toggleLabel}
       </button>, triggerHost)}
-    <AnimatedDisclosure open={open && !hidePanel}>
-      <div ref={panelRef} id={panelId} tabIndex={-1} role="region" aria-label={zh ? '和弦試聽' : 'Chord playback'}
+    <AnimatedDisclosure open={open}>
+      <div ref={panelRef} id={panelId} tabIndex={-1} role="region" hidden={hidePanel} aria-label={zh ? '和弦試聽' : 'Chord playback'}
         className="reader-audition" data-keyboard-refined data-preview-only-control
         onKeyDown={event => { if (event.key === 'Escape' && !event.defaultPrevented) {
           event.stopPropagation(); close();
@@ -137,7 +139,8 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
           <ChordAuditionControl song={song} identity={identity} language={language} selectionLabel=""
             target={{ sectionId: measure.sectionId, sectionOccurrence: measure.sectionOccurrence, barId: measure.barId,
               slotIndex: position?.beat ?? 0, offset: position?.offset, orderedIndex: position?.orderedIndex }}
-            {...preferences} onPlaybackChange={onPlaybackChange} feedbackHost={feedbackHost}/>
+            {...preferences} playbackTuning={playbackTuning} settingsHidden={hidePanel}
+            onPlaybackChange={onPlaybackChange} feedbackHost={feedbackHost}/>
           {byMap ? <div ref={setFeedbackHost} /> : <button type="button" className="reader-start" aria-expanded={choosingStart} aria-controls={pickerId}
             aria-label={`${changeStart} · ${location}`} title={zh ? `更換起點（也可點譜） · ${location}` : `Change start or tap the score · ${location}`} onClick={() => setChoosingStart(value => !value)}>
             <span className="reader-start-section">{sectionName(measureIndex)}</span>
